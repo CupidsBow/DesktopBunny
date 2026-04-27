@@ -1,61 +1,15 @@
 from enum import Enum
-from bunny_platform import Platform
+from components.animation_player import AnimationPlayer
+from components.bunny_platform import Platform
 import pygame.math
+import math
 import os
 import random
-from sprite import Sprite
+from components.sprite import Sprite
 import sys
 from constants import constants
+from typing import List
 
-
-class AnimationPlayer:
-    def __init__(self):
-        self.IDLE_SPRITE = Sprite(constants.BUNNY_IDLE_PNG, 8)
-        self.JUMP_SPRITE = Sprite(constants.BUNNY_JUMP_PNG, 4)
-        self.FLOATING_SPRITE = Sprite(constants.BUNNY_FLOATING_PNG, 4)
-        self.FALLING_SPRITE = Sprite(constants.BUNNY_FALLING_PNG, 4)
-        self.SPECIAL_SPRITE = Sprite(constants.BUNNY_SPECIAL_PNG, 4)
-
-        self.fps = 6
-        self.current_anim = "Idle"
-        self.current_playing_sprite = None
-        self.next_frame_timer = 0.0
-
-    def play(self, sprite: Sprite, anim_name: str):
-        self.current_anim = anim_name
-        self.current_playing_sprite = sprite
-        match self.current_anim:
-            case "Idle":
-                self.current_playing_sprite.frame_sprites = self.IDLE_SPRITE.frame_sprites
-                self.current_playing_sprite.flipped_frame_sprites = self.IDLE_SPRITE.flipped_frame_sprites
-                self.current_playing_sprite.total_frames = self.IDLE_SPRITE.total_frames
-            case "Jump":
-                self.current_playing_sprite.frame_sprites = self.JUMP_SPRITE.frame_sprites
-                self.current_playing_sprite.flipped_frame_sprites = self.JUMP_SPRITE.flipped_frame_sprites
-                self.current_playing_sprite.total_frames = self.JUMP_SPRITE.total_frames
-            case "Floating":
-                self.current_playing_sprite.frame_sprites = self.FLOATING_SPRITE.frame_sprites
-                self.current_playing_sprite.flipped_frame_sprites = self.FLOATING_SPRITE.flipped_frame_sprites
-                self.current_playing_sprite.total_frames = self.FLOATING_SPRITE.total_frames
-            case "Falling":
-                self.current_playing_sprite.frame_sprites = self.FALLING_SPRITE.frame_sprites
-                self.current_playing_sprite.flipped_frame_sprites = self.FALLING_SPRITE.flipped_frame_sprites
-                self.current_playing_sprite.total_frames = self.FALLING_SPRITE.total_frames
-            case "Special":
-                self.current_playing_sprite.frame_sprites = self.SPECIAL_SPRITE.frame_sprites
-                self.current_playing_sprite.flipped_frame_sprites = self.SPECIAL_SPRITE.flipped_frame_sprites
-                self.current_playing_sprite.total_frames = self.SPECIAL_SPRITE.total_frames
-        self.current_playing_sprite.current_frame = 0
-        self.next_frame_timer = 0.0
-    
-    def update(self, delta: float):
-        if self.current_playing_sprite is None:
-            return
-        
-        self.next_frame_timer -= delta
-        if self.next_frame_timer <= 0.0:
-            self.current_playing_sprite.current_frame = (self.current_playing_sprite.current_frame + 1) % self.current_playing_sprite.total_frames
-            self.next_frame_timer += 1.0 / self.fps
 
 class BunnyState(Enum):
     IDLE = 0
@@ -76,7 +30,7 @@ class Bunny:
         self.current_state = BunnyState.IDLE
         self.current_position = pygame.math.Vector2(
             random.randint(int(screen_size.x / 4), int(screen_size.x * 3 / 4)),
-            screen_size.y / 2.0
+            0.0
         )
         self.current_velocity = pygame.math.Vector2(0.0, 0.0)
         self.current_direction = random.randint(0, 1) * 2 - 1
@@ -84,6 +38,7 @@ class Bunny:
         self.idle_timer = 0.0
         self.special_timer = 0.0
         self.jump_cnt = 0
+        self.huge_jump_flag = False
         self.anim_player = AnimationPlayer()
         if getattr(sys, "frozen", False):
             jump_sound_path = os.path.join(sys._MEIPASS, constants.JUMP_WAV_PATH)
@@ -92,6 +47,9 @@ class Bunny:
             self.jump_sound = pygame.mixer.Sound(constants.JUMP_WAV_PATH)
 
         self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, 1000.0))]
+
+    def set_platforms(self, platforms: List[Platform]):
+        self.platforms = platforms
 
     def startup(self):
         self.current_state = BunnyState.IDLE
@@ -130,6 +88,7 @@ class Bunny:
         if self.idle_timer <= 0.0:
             if random.randint(0, 1) == 0:
                 self.jump_cnt = random.randint(3, 5)
+                self.huge_jump_flag = (random.randint(0, 100) < 80)
                 self.change_state(BunnyState.JUMP)
                 return
             else:
@@ -187,7 +146,26 @@ class Bunny:
 
     def enter_floating(self):
         self.anim_player.play(self.sprite, "Floating")
-        self.current_velocity = self.JUMP_VELOCITY + self.MOVE_VELOCITY * self.current_direction
+        platforms_can_jump = [platform for platform in self.platforms if platform.get_top_y() < self.current_position.y]
+        if self.huge_jump_flag and len(platforms_can_jump) > 1:
+            self.huge_jump_flag = False
+
+            huge_jump_platform_index = random.randint(1, len(platforms_can_jump) - 1)
+            target_platform = platforms_can_jump[huge_jump_platform_index]
+
+            landing_x = random.randint(int(target_platform.get_left_x()), int(target_platform.get_right_x()))
+            landing_y = target_platform.get_top_y()
+            
+            self.current_direction = 1 if landing_x > self.current_position.x else -1
+            self.sprite.flip_h = (self.current_direction == 1)
+
+            abs_x = abs(landing_x - self.current_position.x)
+            abs_y = abs(landing_y - self.current_position.y)
+
+            huge_jump_time = math.sqrt((2 * abs_y + 200) / self.GRAVITY.y) + math.sqrt(200.0 / self.GRAVITY.y)
+            self.current_velocity = pygame.math.Vector2(0.0, -math.sqrt((2 * abs_y + 200) * self.GRAVITY.y)) + pygame.math.Vector2(abs_x / huge_jump_time, 0.0) * self.current_direction
+        else:
+            self.current_velocity = self.JUMP_VELOCITY + self.MOVE_VELOCITY * self.current_direction
 
     def enter_falling(self):
         self.anim_player.play(self.sprite, "Falling")

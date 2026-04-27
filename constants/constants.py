@@ -6,3 +6,5 @@ BUNNY_FLOATING_PNG = "assets/BunnyFloating.png"
 BUNNY_FALLING_PNG = "assets/BunnyFalling.png"
 BUNNY_SPECIAL_PNG = "assets/BunnySpecial.png"
 JUMP_WAV_PATH = "assets/se_jump.wav"
+PLATFORM_HEIGHT = 100
+PLATFORM_DETECT_TIME_INTERVAL_SECONDS = 2

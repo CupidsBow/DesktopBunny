@@ -1,4 +1,4 @@
-from sprite import Sprite
+from components.sprite import Sprite
 from constants import constants
 
 class AnimationPlayer:

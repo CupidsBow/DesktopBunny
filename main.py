@@ -1,12 +1,15 @@
+from components.bunny_platform import Platform
 import pygame
 import sys
 import ctypes
 import os
 import threading
+import time
 from components.bunny import Bunny
 from PIL import Image
 import pystray
 from constants import constants
+from utils.platform_detector import PlatformDetector
 
 
 class World:
@@ -28,11 +31,17 @@ class World:
         self.tray_icon = None
         self.tray_thread = None
 
+        self.detector = PlatformDetector()
+
     def startup(self):
         pygame.init()
         pygame.mixer.init()
         
         self.window_size = self.get_physical_work_area()
+        self.INIT_BOTTOM_PLATFORM = Platform(
+            pygame.math.Vector2(0, self.window_size[1]),
+            pygame.math.Vector2(self.window_size[0], constants.PLATFORM_HEIGHT)
+        )
         
         self.screen = pygame.display.set_mode(self.window_size, pygame.NOFRAME)
         self.clock = pygame.time.Clock()
@@ -56,6 +65,8 @@ class World:
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
+        self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
+        self.platform_detect_thread.start()
     
     def _start_tray(self):
         def _run_tray():
@@ -167,7 +178,16 @@ class World:
             self.window.alwaysOnTop(True)
         except ImportError:
             print("pywinctl not found.")
-        
+    
+    def _update_platforms_loop(self):
+        while self.running:
+            platforms = self.detector.get_platforms_for_bunny(top_n=5)
+            print(f"检测到平台数量: {len(platforms)}")
+            print("平台位置:", [(p.vertex.x, p.vertex.y, p.size.x, p.size.y) for p in platforms])
+            for bunny in self.bunnies:
+                bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
+            time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
+
     def update(self, delta: float):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:

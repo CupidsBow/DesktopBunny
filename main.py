@@ -6,11 +6,13 @@ import threading
 from components.bunny import Bunny
 from PIL import Image
 import pystray
+from constants import constants
+
 
 class World:
-    def __init__(self, fps=60):
+    def __init__(self, fps=constants.GLOBAL_FPS):
         self.TRANSPARENT_COLOR = (255, 0, 255)
-        self.ICON_PATH = "assets/icon.png"
+        self.ICON_PATH = constants.BUNNY_ICON
 
         self.fps = fps
         
@@ -212,5 +214,5 @@ if __name__ == "__main__":
         except AttributeError:
             pass # 如果都不支持，则跳过
 
-    world = World(fps=60)
+    world = World(fps=constants.GLOBAL_FPS)
     world.run()

@@ -1,55 +1,20 @@
 from enum import Enum
+from bunny_platform import Platform
 import pygame.math
 import os
 import random
+from sprite import Sprite
 import sys
+from constants import constants
 
-BUNNY_IDLE_PNG = "assets/BunnyIdle.png"
-BUNNY_JUMP_PNG = "assets/BunnyJump.png"
-BUNNY_FLOATING_PNG = "assets/BunnyFloating.png"
-BUNNY_FALLING_PNG = "assets/BunnyFalling.png"
-BUNNY_SPECIAL_PNG = "assets/BunnySpecial.png"
-JUMP_WAV_PATH = "assets/se_jump.wav"
-
-class Sprite:
-    def __init__(self, sprite_path: str, total_frames):
-        self.FIXED_SPRITE_SIZE = 32
-
-        if getattr(sys, "frozen", False):
-            sprite_path = os.path.join(sys._MEIPASS, sprite_path)
-        image = pygame.image.load(sprite_path).convert_alpha()
-
-        self.total_frames = total_frames
-        self.current_frame = 0
-        self.flip_h = False
-        self.frame_sprites = []
-        for i in range(self.total_frames):
-            self.frame_sprites.append(
-                pygame.transform.scale(
-                    image.subsurface(
-                        pygame.Rect(
-                            i * self.FIXED_SPRITE_SIZE,
-                            0,
-                            self.FIXED_SPRITE_SIZE,
-                            self.FIXED_SPRITE_SIZE
-                        )),
-                    (128, 128)
-                )
-            )
-        self.flipped_frame_sprites = [pygame.transform.flip(frame, True, False) for frame in self.frame_sprites]
-    
-    def get_draw_image(self):
-        if self.flip_h:
-            return self.flipped_frame_sprites[self.current_frame]
-        return self.frame_sprites[self.current_frame]
 
 class AnimationPlayer:
     def __init__(self):
-        self.IDLE_SPRITE = Sprite(BUNNY_IDLE_PNG, 8)
-        self.JUMP_SPRITE = Sprite(BUNNY_JUMP_PNG, 4)
-        self.FLOATING_SPRITE = Sprite(BUNNY_FLOATING_PNG, 4)
-        self.FALLING_SPRITE = Sprite(BUNNY_FALLING_PNG, 4)
-        self.SPECIAL_SPRITE = Sprite(BUNNY_SPECIAL_PNG, 4)
+        self.IDLE_SPRITE = Sprite(constants.BUNNY_IDLE_PNG, 8)
+        self.JUMP_SPRITE = Sprite(constants.BUNNY_JUMP_PNG, 4)
+        self.FLOATING_SPRITE = Sprite(constants.BUNNY_FLOATING_PNG, 4)
+        self.FALLING_SPRITE = Sprite(constants.BUNNY_FALLING_PNG, 4)
+        self.SPECIAL_SPRITE = Sprite(constants.BUNNY_SPECIAL_PNG, 4)
 
         self.fps = 6
         self.current_anim = "Idle"
@@ -92,23 +57,6 @@ class AnimationPlayer:
             self.current_playing_sprite.current_frame = (self.current_playing_sprite.current_frame + 1) % self.current_playing_sprite.total_frames
             self.next_frame_timer += 1.0 / self.fps
 
-class Platform:
-    def __init__(self, new_vertex, new_size):
-        self.vertex = new_vertex
-        self.size = new_size
-    
-    def get_left_x(self):
-        return self.vertex.x
-    
-    def get_right_x(self):
-        return self.vertex.x + self.size.x
-
-    def get_bottom_y(self):
-        return self.vertex.y + self.size.y
-
-    def get_top_y(self):
-        return self.vertex.y
-
 class BunnyState(Enum):
     IDLE = 0
     JUMP = 1
@@ -124,7 +72,7 @@ class Bunny:
         self.BUNNY_SIZE = pygame.math.Vector2(48.0, 64.0)
         self.SCREEN_SIZE = screen_size
 
-        self.sprite = Sprite(BUNNY_IDLE_PNG, 8)
+        self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8)
         self.current_state = BunnyState.IDLE
         self.current_position = pygame.math.Vector2(
             random.randint(int(screen_size.x / 4), int(screen_size.x * 3 / 4)),
@@ -138,10 +86,10 @@ class Bunny:
         self.jump_cnt = 0
         self.anim_player = AnimationPlayer()
         if getattr(sys, "frozen", False):
-            jump_sound_path = os.path.join(sys._MEIPASS, JUMP_WAV_PATH)
+            jump_sound_path = os.path.join(sys._MEIPASS, constants.JUMP_WAV_PATH)
             self.jump_sound = pygame.mixer.Sound(jump_sound_path)
         else:
-            self.jump_sound = pygame.mixer.Sound(JUMP_WAV_PATH)
+            self.jump_sound = pygame.mixer.Sound(constants.JUMP_WAV_PATH)
 
         self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, 1000.0))]
 

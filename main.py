@@ -2,7 +2,10 @@ import pygame
 import sys
 import ctypes
 import os
+import threading
 from components.bunny import Bunny
+from PIL import Image
+import pystray
 
 class World:
     def __init__(self, fps=60):
@@ -20,17 +23,18 @@ class World:
         self.last_frame_time = 0
         self.delta = 0.0
         self.bunnies = []
+        self.tray_icon = None
+        self.tray_thread = None
 
     def startup(self):
         pygame.init()
         pygame.mixer.init()
         
-        # 获取工作区域（排除任务栏）
         self.window_size = self.get_physical_work_area()
         
         self.screen = pygame.display.set_mode(self.window_size, pygame.NOFRAME)
         self.clock = pygame.time.Clock()
-        self.last_frame_time = pygame.time.get_ticks()  # 初始化时间
+        self.last_frame_time = pygame.time.get_ticks()
         
         self.hwnd = pygame.display.get_wm_info()['window']
         ctypes.windll.user32.ShowWindow(self.hwnd, 0)
@@ -41,6 +45,8 @@ class World:
         self._set_always_on_top()
         self._position_to_work_area()
         
+        self._start_tray()
+        
         ctypes.windll.user32.ShowWindow(self.hwnd, 5)
 
         self.running = True
@@ -48,6 +54,36 @@ class World:
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
+    
+    def _start_tray(self):
+        def _run_tray():
+            if os.path.exists(self.ICON_PATH):
+                image = Image.open(self.ICON_PATH)
+            else:
+                image = Image.new('RGB', (64, 64), (255, 0, 0))
+            
+            # 创建菜单
+            menu = pystray.Menu(
+                pystray.MenuItem("Quit", self._on_tray_exit)
+            )
+            
+            # 创建托盘图标
+            self.tray_icon = pystray.Icon(
+                "bunny",
+                image,
+                "Bunny",
+                menu
+            )
+            
+            self.tray_icon.run()
+        
+        self.tray_thread = threading.Thread(target=_run_tray, daemon=True)
+        self.tray_thread.start()
+    
+    def _on_tray_exit(self):
+        self.running = False
+        if self.tray_icon:
+            self.tray_icon.stop()
     
     def _calculate_delta(self):
         current_time = pygame.time.get_ticks()
@@ -114,10 +150,8 @@ class World:
         try:
             GWL_EXSTYLE = -20
             WS_EX_TOOLWINDOW = 0x00000080
-            
             style = ctypes.windll.user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
             ctypes.windll.user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW)
-            
         except Exception as e:
             print(f"hide from taskbar failed: {e}")
         
@@ -136,12 +170,12 @@ class World:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+        
         for bunny in self.bunnies:
             bunny.update(delta)
                     
     def draw(self, delta: float):
         self.screen.fill(self.TRANSPARENT_COLOR)
-        center = (self.window_size[0] // 2, self.window_size[1] // 2)
 
         for bunny in self.bunnies:
             bunny.draw(delta, self.screen)
@@ -149,6 +183,8 @@ class World:
         pygame.display.flip()
         
     def shutdown(self):
+        if self.tray_icon:
+            self.tray_icon.stop()
         pygame.quit()
         sys.exit()
         

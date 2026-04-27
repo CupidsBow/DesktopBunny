@@ -9,7 +9,7 @@ from components.bunny import Bunny
 from PIL import Image
 import pystray
 from constants import constants
-from utils.platform_detector import PlatformDetector
+from tools.platform_detector import PlatformDetector
 
 
 class World:

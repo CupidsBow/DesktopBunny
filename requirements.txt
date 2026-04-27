@@ -1,0 +1,5 @@
+pygame==2.6.1
+PyAutoGUI==0.9.54
+pyinstaller==6.20.0
+pillow==12.2.0
+PyWinCtl==0.4.1

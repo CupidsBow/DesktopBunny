@@ -1,11 +1,17 @@
 from enum import Enum
 import pygame.math
+import os
+from pathlib import Path
 import random
+import sys
 
 class Sprite:
     def __init__(self, sprite_path: str, total_frames):
         self.FIXED_SPRITE_SIZE = 32
 
+        if getattr(sys, "frozen", False):
+            base_path = sys._MEIPASS  
+            sprite_path = os.path.join(base_path, sprite_path)
         image = pygame.image.load(sprite_path).convert_alpha()
 
         self.total_frames = total_frames
@@ -126,7 +132,12 @@ class Bunny:
         self.special_timer = 0.0
         self.jump_cnt = 0
         self.anim_player = AnimationPlayer()
-        self.jump_sound = pygame.mixer.Sound("assets/se_jump.wav") 
+        if getattr(sys, "frozen", False):
+            base_path = sys._MEIPASS
+            jump_sound_path = os.path.join(base_path, "assets/se_jump.wav")
+            self.jump_sound = pygame.mixer.Sound(jump_sound_path)
+        else:
+            self.jump_sound = pygame.mixer.Sound("assets/se_jump.wav")
 
         self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, 1000.0))]
 

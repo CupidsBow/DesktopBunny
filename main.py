@@ -58,7 +58,10 @@ class World:
     def _start_tray(self):
         def _run_tray():
             if os.path.exists(self.ICON_PATH):
-                image = Image.open(self.ICON_PATH)
+                if getattr(sys, "frozen", False):
+                    image = Image.open(os.path.join(sys._MEIPASS, self.ICON_PATH))
+                else:
+                    image = Image.open(self.ICON_PATH)
             else:
                 image = Image.new('RGB', (64, 64), (255, 0, 0))
             

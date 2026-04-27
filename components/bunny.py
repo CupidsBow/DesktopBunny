@@ -1,17 +1,22 @@
 from enum import Enum
 import pygame.math
 import os
-from pathlib import Path
 import random
 import sys
+
+BUNNY_IDLE_PNG = "assets/BunnyIdle.png"
+BUNNY_JUMP_PNG = "assets/BunnyJump.png"
+BUNNY_FLOATING_PNG = "assets/BunnyFloating.png"
+BUNNY_FALLING_PNG = "assets/BunnyFalling.png"
+BUNNY_SPECIAL_PNG = "assets/BunnySpecial.png"
+JUMP_WAV_PATH = "assets/se_jump.wav"
 
 class Sprite:
     def __init__(self, sprite_path: str, total_frames):
         self.FIXED_SPRITE_SIZE = 32
 
         if getattr(sys, "frozen", False):
-            base_path = sys._MEIPASS  
-            sprite_path = os.path.join(base_path, sprite_path)
+            sprite_path = os.path.join(sys._MEIPASS, sprite_path)
         image = pygame.image.load(sprite_path).convert_alpha()
 
         self.total_frames = total_frames
@@ -40,11 +45,11 @@ class Sprite:
 
 class AnimationPlayer:
     def __init__(self):
-        self.IDLE_SPRITE = Sprite("assets/BunnyIdle.png", 8)
-        self.JUMP_SPRITE = Sprite("assets/BunnyJump.png", 4)
-        self.FLOATING_SPRITE = Sprite("assets/BunnyFloating.png", 4)
-        self.FALLING_SPRITE = Sprite("assets/BunnyFalling.png", 4)
-        self.SPECIAL_SPRITE = Sprite("assets/BunnySpecial.png", 4)
+        self.IDLE_SPRITE = Sprite(BUNNY_IDLE_PNG, 8)
+        self.JUMP_SPRITE = Sprite(BUNNY_JUMP_PNG, 4)
+        self.FLOATING_SPRITE = Sprite(BUNNY_FLOATING_PNG, 4)
+        self.FALLING_SPRITE = Sprite(BUNNY_FALLING_PNG, 4)
+        self.SPECIAL_SPRITE = Sprite(BUNNY_SPECIAL_PNG, 4)
 
         self.fps = 6
         self.current_anim = "Idle"
@@ -119,7 +124,7 @@ class Bunny:
         self.BUNNY_SIZE = pygame.math.Vector2(48.0, 64.0)
         self.SCREEN_SIZE = screen_size
 
-        self.sprite = Sprite("assets/BunnyIdle.png", 8)
+        self.sprite = Sprite(BUNNY_IDLE_PNG, 8)
         self.current_state = BunnyState.IDLE
         self.current_position = pygame.math.Vector2(
             random.randint(int(screen_size.x / 4), int(screen_size.x * 3 / 4)),
@@ -133,11 +138,10 @@ class Bunny:
         self.jump_cnt = 0
         self.anim_player = AnimationPlayer()
         if getattr(sys, "frozen", False):
-            base_path = sys._MEIPASS
-            jump_sound_path = os.path.join(base_path, "assets/se_jump.wav")
+            jump_sound_path = os.path.join(sys._MEIPASS, JUMP_WAV_PATH)
             self.jump_sound = pygame.mixer.Sound(jump_sound_path)
         else:
-            self.jump_sound = pygame.mixer.Sound("assets/se_jump.wav")
+            self.jump_sound = pygame.mixer.Sound(JUMP_WAV_PATH)
 
         self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, 1000.0))]
 

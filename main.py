@@ -4,10 +4,100 @@ import ctypes
 import os
 from components.bunny import Bunny
 
+# 系统托盘相关常量
+WM_USER = 0x0400
+WM_TRAYICON = WM_USER + 1
+NIM_ADD = 0
+NIM_DELETE = 2
+NIF_MESSAGE = 1
+NIF_ICON = 2
+NIF_TIP = 4
+
+class TrayIcon:
+    def __init__(self, world_ref):
+        self.world = world_ref
+        self.hwnd = None
+        self.hicon = None
+        
+    def create_tray(self, hwnd, icon_path):
+        self.hwnd = hwnd
+        
+        if getattr(sys, "frozen", False):
+            icon_path = os.path.join(sys._MEIPASS, icon_path)
+        
+        self.hicon = ctypes.windll.user32.LoadImageW(
+            None, icon_path, 1, 32, 32, 0x00000010
+        )
+        
+        if not self.hicon:
+            print(f"加载图标失败，使用默认图标")
+            self.hicon = ctypes.windll.user32.LoadIconW(None, 32516)
+        
+        class NOTIFYICONDATA(ctypes.Structure):
+            _fields_ = [
+                ('cbSize', ctypes.c_ulong),
+                ('hWnd', ctypes.c_void_p),
+                ('uID', ctypes.c_uint),
+                ('uFlags', ctypes.c_uint),
+                ('uCallbackMessage', ctypes.c_uint),
+                ('hIcon', ctypes.c_void_p),
+                ('szTip', ctypes.c_wchar * 128),
+                ('dwState', ctypes.c_ulong),
+                ('dwStateMask', ctypes.c_ulong),
+                ('szInfo', ctypes.c_wchar * 256),
+                ('uTimeout', ctypes.c_uint),
+                ('szInfoTitle', ctypes.c_wchar * 64),
+                ('dwInfoFlags', ctypes.c_ulong),
+            ]
+        
+        nid = NOTIFYICONDATA()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
+        nid.hWnd = self.hwnd
+        nid.uID = 1
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        nid.uCallbackMessage = WM_TRAYICON
+        nid.hIcon = self.hicon
+        nid.szTip = "Bunny"
+        
+        ctypes.windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        
+    def remove_tray(self):
+        if not self.hwnd:
+            return
+            
+        class NOTIFYICONDATA(ctypes.Structure):
+            _fields_ = [
+                ('cbSize', ctypes.c_ulong),
+                ('hWnd', ctypes.c_void_p),
+                ('uID', ctypes.c_uint),
+                ('uFlags', ctypes.c_uint),
+                ('uCallbackMessage', ctypes.c_uint),
+                ('hIcon', ctypes.c_void_p),
+                ('szTip', ctypes.c_wchar * 128),
+                ('dwState', ctypes.c_ulong),
+                ('dwStateMask', ctypes.c_ulong),
+                ('szInfo', ctypes.c_wchar * 256),
+                ('uTimeout', ctypes.c_uint),
+                ('szInfoTitle', ctypes.c_wchar * 64),
+                ('dwInfoFlags', ctypes.c_ulong),
+            ]
+        
+        nid = NOTIFYICONDATA()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
+        nid.hWnd = self.hwnd
+        nid.uID = 1
+        
+        ctypes.windll.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+        
+        if self.hicon:
+            ctypes.windll.user32.DestroyIcon(self.hicon)
+
+
 class World:
     def __init__(self, fps=60):
         self.TRANSPARENT_COLOR = (255, 0, 255)
         self.ICON_PATH = "assets/icon.png"
+        self.ICO_PATH = "assets/icon.ico"
 
         self.fps = fps
         
@@ -20,17 +110,17 @@ class World:
         self.last_frame_time = 0
         self.delta = 0.0
         self.bunnies = []
+        self.tray = None
 
     def startup(self):
         pygame.init()
         pygame.mixer.init()
         
-        # 获取工作区域（排除任务栏）
         self.window_size = self.get_physical_work_area()
         
         self.screen = pygame.display.set_mode(self.window_size, pygame.NOFRAME)
         self.clock = pygame.time.Clock()
-        self.last_frame_time = pygame.time.get_ticks()  # 初始化时间
+        self.last_frame_time = pygame.time.get_ticks()
         
         self.hwnd = pygame.display.get_wm_info()['window']
         ctypes.windll.user32.ShowWindow(self.hwnd, 0)
@@ -40,6 +130,9 @@ class World:
         self._hide_from_taskbar()
         self._set_always_on_top()
         self._position_to_work_area()
+        
+        self.tray = TrayIcon(self)
+        self.tray.create_tray(self.hwnd, self.ICO_PATH)
         
         ctypes.windll.user32.ShowWindow(self.hwnd, 5)
 
@@ -128,6 +221,24 @@ class World:
             self.window.alwaysOnTop(True)
         except ImportError:
             print("pywinctl not found.")
+    
+    def _handle_tray_message(self):
+        menu = ctypes.windll.user32.CreatePopupMenu()
+        ctypes.windll.user32.AppendMenuW(menu, 0x00000000, 1, "退出")
+        
+        class POINT(ctypes.Structure):
+            _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
+        point = POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+        
+        ctypes.windll.user32.SetForegroundWindow(self.hwnd)
+        cmd = ctypes.windll.user32.TrackPopupMenu(
+            menu, 0x0002 | 0x0100, point.x, point.y, 0, self.hwnd, None
+        )
+        ctypes.windll.user32.DestroyMenu(menu)
+        
+        if cmd == 1:
+            self.running = False
         
     def update(self, delta: float):
         for event in pygame.event.get():
@@ -136,12 +247,23 @@ class World:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+        
+        # 处理托盘消息
+        try:
+            msg = ctypes.wintypes.MSG()
+            while ctypes.windll.user32.PeekMessageW(ctypes.byref(msg), self.hwnd, WM_TRAYICON, WM_TRAYICON, 1):
+                if msg.message == WM_TRAYICON and msg.lParam == 0x0205:  # WM_RBUTTONUP
+                    self._handle_tray_message()
+                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+        except:
+            pass
+                    
         for bunny in self.bunnies:
             bunny.update(delta)
                     
     def draw(self, delta: float):
         self.screen.fill(self.TRANSPARENT_COLOR)
-        center = (self.window_size[0] // 2, self.window_size[1] // 2)
 
         for bunny in self.bunnies:
             bunny.draw(delta, self.screen)
@@ -149,6 +271,8 @@ class World:
         pygame.display.flip()
         
     def shutdown(self):
+        if self.tray:
+            self.tray.remove_tray()
         pygame.quit()
         sys.exit()
         

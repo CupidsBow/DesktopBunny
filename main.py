@@ -182,8 +182,6 @@ class World:
     def _update_platforms_loop(self):
         while self.running:
             platforms = self.detector.get_platforms_for_bunny(top_n=5)
-            print(f"检测到平台数量: {len(platforms)}")
-            print("平台位置:", [(p.vertex.x, p.vertex.y, p.size.x, p.size.y) for p in platforms])
             for bunny in self.bunnies:
                 bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)

@@ -80,6 +80,8 @@ class World:
             
             # 创建菜单
             menu = pystray.Menu(
+                pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
+                pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
                 pystray.MenuItem("Quit", self._on_tray_exit)
             )
             
@@ -96,6 +98,14 @@ class World:
         self.tray_thread = threading.Thread(target=_run_tray, daemon=True)
         self.tray_thread.start()
     
+    def _on_tray_add_bunny(self):
+        if self.bunnies and len(self.bunnies) < constants.BUNNY_MAX_NUM:
+            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
+
+    def _on_tray_delete_bunny(self):
+        if self.bunnies and len(self.bunnies) > 1:
+            self.bunnies.pop()
+
     def _on_tray_exit(self):
         self.running = False
         if self.tray_icon:

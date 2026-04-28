@@ -40,6 +40,8 @@ class Bunny:
         self.jump_cnt = 0
         self.huge_jump_flag = False
         self.anim_player = AnimationPlayer()
+        self.current_comment = None
+        self.comment_display_timer = 0.0
         if getattr(sys, "frozen", False):
             jump_sound_path = os.path.join(sys._MEIPASS, constants.JUMP_WAV_PATH)
             self.jump_sound = pygame.mixer.Sound(jump_sound_path)
@@ -51,11 +53,83 @@ class Bunny:
     def set_platforms(self, platforms: List[Platform]):
         self.platforms = platforms
 
+    def set_comment(self, comment: str):
+        """设置要显示的评论，显示 6 秒"""
+        self.current_comment = comment
+        self.comment_display_timer = 6.0
+
+    def _draw_speech_bubble(self, screen: pygame.Surface):
+        if not self.current_comment:
+            return
+        
+        # ✅ 使用支持中文的字体
+        font_paths = [
+            "C:/Windows/Fonts/msyh.ttc",        # 微软雅黑
+            "C:/Windows/Fonts/simhei.ttf",       # 黑体
+            "C:/Windows/Fonts/simsun.ttc",       # 宋体
+            "C:/Windows/Fonts/msyhbd.ttc",       # 微软雅黑粗体
+        ]
+        
+        font = None
+        for path in font_paths:
+            if os.path.exists(path):
+                font = pygame.font.Font(path, 18)
+                break
+        
+        if font is None:
+            # 兜底：用系统默认字体（可能不支持中文）
+            font = pygame.font.Font(None, 22)
+        
+        # 气泡位置（兔子头上方）
+        bunny_top = self.current_position.y - self.BUNNY_SIZE.y / 2
+        bubble_x = self.current_position.x
+        bubble_y = bunny_top - 50
+        
+        # 文字渲染（白色）
+        text_surface = font.render(self.current_comment, True, (0, 0, 0))
+        text_rect = text_surface.get_rect(center=(bubble_x, bubble_y))
+        
+        # 气泡背景
+        padding_x, padding_y = 12, 8
+        bg_rect = text_rect.inflate(padding_x * 2, padding_y * 2)
+        
+        # 确保气泡不超出屏幕
+        screen_width = screen.get_width()
+        if bg_rect.left < 10:
+            bg_rect.left = 10
+            text_rect.centerx = bg_rect.centerx
+        if bg_rect.right > screen_width - 10:
+            bg_rect.right = screen_width - 10
+            text_rect.centerx = bg_rect.centerx
+        
+        # 画气泡背景
+        pygame.draw.rect(screen, (255, 255, 255), bg_rect, border_radius=10)
+        pygame.draw.rect(screen, (180, 180, 180), bg_rect, 2, border_radius=10)
+        
+        # 气泡三角
+        arrow_x = self.current_position.x
+        points = [
+            (arrow_x - 8, bg_rect.bottom),
+            (arrow_x, bg_rect.bottom + 10),
+            (arrow_x + 8, bg_rect.bottom),
+        ]
+        pygame.draw.polygon(screen, (255, 255, 255), points)
+        pygame.draw.polygon(screen, (180, 180, 180), points, 1)
+        
+        # 画文字
+        screen.blit(text_surface, text_rect)
+
     def startup(self):
         self.current_state = BunnyState.IDLE
         self.enter_idle()
         
     def update(self, delta: float):
+        # 更新评论显示计时器
+        if self.current_comment:
+            self.comment_display_timer -= delta
+            if self.comment_display_timer <= 0:
+                self.current_comment = None
+
         self.anim_player.update(delta)
         match self.current_state:
             case BunnyState.IDLE:
@@ -74,6 +148,9 @@ class Bunny:
         draw_x = self.current_position.x - image.get_width() / 2
         draw_y = self.current_position.y - image.get_height() / 2
         screen.blit(image, (draw_x, draw_y))
+
+        # ✅ 画对话气泡
+        self._draw_speech_bubble(screen)
 
     def update_idle(self, delta: float):
         if not self.is_on_floor_and_adjust_y():
@@ -147,10 +224,10 @@ class Bunny:
     def enter_floating(self):
         self.anim_player.play(self.sprite, "Floating")
         platforms_can_jump = [platform for platform in self.platforms if platform.get_top_y() < self.current_position.y]
-        if self.huge_jump_flag and len(platforms_can_jump) > 1:
+        if self.huge_jump_flag and len(platforms_can_jump) > 0:
             self.huge_jump_flag = False
 
-            huge_jump_platform_index = random.randint(1, len(platforms_can_jump) - 1)
+            huge_jump_platform_index = random.randint(0, len(platforms_can_jump) - 1)
             target_platform = platforms_can_jump[huge_jump_platform_index]
 
             landing_x = random.randint(int(target_platform.get_left_x()), int(target_platform.get_right_x()))
@@ -232,3 +309,25 @@ class Bunny:
                 self.current_position.y = platform.get_top_y() - self.BUNNY_SIZE.y / 2.0 + 1.0
                 return True
         return False
+    
+    def handle_click(self, mouse_pos: tuple) -> bool:
+        image = self.sprite.get_draw_image()
+        draw_x = self.current_position.x - image.get_width() / 2
+        draw_y = self.current_position.y - image.get_height() / 2
+        
+        # 兔子矩形区域
+        bunny_rect = pygame.Rect(draw_x, draw_y, image.get_width(), image.get_height())
+        
+        if bunny_rect.collidepoint(mouse_pos):
+            self.on_clicked()
+            return True
+        return False
+    
+    def on_clicked(self):
+        if self.current_state == BunnyState.IDLE or self.current_state == BunnyState.SPECIAL:
+            self.idle_timer = 0.0
+            self.special_timer = 0.0
+            self.jump_cnt = random.randint(3, 5)
+            self.huge_jump_flag = (random.randint(0, 100) < 80)
+            self.change_state(BunnyState.JUMP)
+            return

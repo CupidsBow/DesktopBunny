@@ -10,6 +10,7 @@ from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
+import random
 
 
 class World:
@@ -67,6 +68,8 @@ class World:
         self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
         self.platform_detect_thread.start()
+        self.screen_analyze_thread = threading.Thread(target=self._screen_analyze_loop, daemon=True)
+        self.screen_analyze_thread.start()
     
     def _start_tray(self):
         def _run_tray():
@@ -191,10 +194,23 @@ class World:
     
     def _update_platforms_loop(self):
         while self.running:
-            platforms = self.detector.get_platforms_for_bunny(top_n=5)
+            platforms = self.detector.get_platforms_for_bunny(top_n=constants.PLATFORM_MAX_NUM)
             for bunny in self.bunnies:
                 bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
+
+    def _screen_analyze_loop(self):
+        from tools.screen_analyzer import ScreenAnalyzer
+        analyzer = ScreenAnalyzer()
+        while self.running:
+            try:
+                comment = analyzer.analyze(self.detector)
+                if comment:
+                    comment_bunny = self.bunnies[random.randint(0, len(self.bunnies)-1)]
+                    comment_bunny.set_comment(comment)
+            except Exception as e:
+                print(f"Screen analyze failed: {e}")
+            time.sleep(random.randint(constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS, constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS))
 
     def update(self, delta: float):
         for event in pygame.event.get():
@@ -203,6 +219,11 @@ class World:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    for i in range(len(self.bunnies)-1, -1, -1):
+                        if self.bunnies[i].handle_click(event.pos):
+                            break
         
         for bunny in self.bunnies:
             bunny.update(delta)

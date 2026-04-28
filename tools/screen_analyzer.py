@@ -81,7 +81,7 @@ class ScreenAnalyzer:
 
         except Exception as e:
             print(f"分析失败: {e}")
-            return ""
+            return None
 
     def test(self, image_path: str = None):
         """

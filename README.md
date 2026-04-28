@@ -10,7 +10,7 @@
 - 读取屏幕内容并吐槽（需要Ollama）
 
 ## Quick Start
-安装Python版本 3.13.13
+安装 Python 3.13.13
 
 > pip install -r requirements.txt
 >
@@ -18,6 +18,6 @@
 
 运行`dist`目录下的`main.exe`
 
-## 连接Ollama
+## 连接 Ollama
 
-目前写死了使用`qwen3-vl:4b`模型，需要安装Ollama的`qwen3-vl:4b`模型并开放接口供Bunny调用
+目前写死了使用`qwen3-vl:4b`模型，需要在 Ollama 安装`qwen3-vl:4b`模型并开放接口供 Bunny 调用

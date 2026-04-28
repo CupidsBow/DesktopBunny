@@ -73,7 +73,7 @@ class Bunny:
         font = None
         for path in font_paths:
             if os.path.exists(path):
-                font = pygame.font.Font(path, 18)
+                font = pygame.font.Font(path, 22)
                 break
         
         if font is None:

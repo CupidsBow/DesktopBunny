@@ -206,11 +206,14 @@ class World:
             try:
                 comment = analyzer.analyze(self.detector)
                 if comment:
-                    comment_bunny = self.bunnies[random.randint(0, len(self.bunnies)-1)]
+                    comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
                     comment_bunny.set_comment(comment)
             except Exception as e:
                 print(f"Screen analyze failed: {e}")
-            time.sleep(random.randint(constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS, constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS))
+            time.sleep(random.randint(
+                constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS, 
+                constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS
+            ))
 
     def update(self, delta: float):
         for event in pygame.event.get():

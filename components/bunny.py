@@ -103,7 +103,7 @@ class Bunny:
             text_rect.centerx = bg_rect.centerx
         
         # 画气泡背景
-        pygame.draw.rect(screen, (255, 255, 255), bg_rect, border_radius=10)
+        pygame.draw.rect(screen, (253, 247, 249), bg_rect, border_radius=10)
         pygame.draw.rect(screen, (180, 180, 180), bg_rect, 2, border_radius=10)
         
         # 气泡三角

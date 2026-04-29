@@ -113,7 +113,7 @@ class Bunny:
             (arrow_x, bg_rect.bottom + 10),
             (arrow_x + 8, bg_rect.bottom),
         ]
-        pygame.draw.polygon(screen, (255, 255, 255), points)
+        pygame.draw.polygon(screen, (253, 247, 249), points)
         pygame.draw.polygon(screen, (180, 180, 180), points, 1)
         
         # 画文字

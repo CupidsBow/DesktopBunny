@@ -31,6 +31,7 @@ class World:
         self.bunnies = []
         self.tray_icon = None
         self.tray_thread = None
+        self.detect_platforms_enabled = True
         self.screen_analyze_enabled = True
 
         self.detector = PlatformDetector()
@@ -87,6 +88,11 @@ class World:
                 pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
                 pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
                 pystray.MenuItem(
+                    "Detect platforms",
+                    self._on_tray_toggle_platform_detection,
+                    checked=lambda item: self.detect_platforms_enabled
+                ),
+                pystray.MenuItem(
                     "Read screen (Ollama needed)",
                     self._on_tray_toggle_screen_analysis,
                     checked=lambda item: self.screen_analyze_enabled
@@ -114,6 +120,12 @@ class World:
     def _on_tray_delete_bunny(self):
         if self.bunnies and len(self.bunnies) > 1:
             self.bunnies.pop()
+
+    def _on_tray_toggle_platform_detection(self, *args):
+        self.detect_platforms_enabled = not self.detect_platforms_enabled
+        if not self.detect_platforms_enabled:
+            for bunny in self.bunnies:
+                bunny.set_platforms([self.INIT_BOTTOM_PLATFORM])
 
     def _on_tray_toggle_screen_analysis(self, *args):
         self.screen_analyze_enabled = not self.screen_analyze_enabled
@@ -235,9 +247,10 @@ class World:
     
     def _update_platforms_loop(self):
         while self.running:
-            platforms = self.detector.get_platforms_for_bunny(top_n=constants.PLATFORM_MAX_NUM)
-            for bunny in self.bunnies:
-                bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
+            if self.detect_platforms_enabled:
+                platforms = self.detector.get_platforms_for_bunny(top_n=constants.PLATFORM_MAX_NUM)
+                for bunny in self.bunnies:
+                    bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
 
     def _screen_analyze_loop(self):

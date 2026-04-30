@@ -31,6 +31,7 @@ class World:
         self.bunnies = []
         self.tray_icon = None
         self.tray_thread = None
+        self.screen_analyze_enabled = True
 
         self.detector = PlatformDetector()
 
@@ -85,6 +86,11 @@ class World:
             menu = pystray.Menu(
                 pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
                 pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
+                pystray.MenuItem(
+                    "Read screen (Ollama needed)",
+                    self._on_tray_toggle_screen_analysis,
+                    checked=lambda item: self.screen_analyze_enabled
+                ),
                 pystray.MenuItem("Quit", self._on_tray_exit)
             )
             
@@ -108,6 +114,9 @@ class World:
     def _on_tray_delete_bunny(self):
         if self.bunnies and len(self.bunnies) > 1:
             self.bunnies.pop()
+
+    def _on_tray_toggle_screen_analysis(self, *args):
+        self.screen_analyze_enabled = not self.screen_analyze_enabled
 
     def _on_tray_exit(self):
         self.running = False
@@ -204,10 +213,11 @@ class World:
         analyzer = ScreenAnalyzer()
         while self.running:
             try:
-                comment = analyzer.analyze(self.detector)
-                if comment:
-                    comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
-                    comment_bunny.set_comment(comment)
+                if self.screen_analyze_enabled:
+                    comment = analyzer.analyze(self.detector)
+                    if comment:
+                        comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
+                        comment_bunny.set_comment(comment)
             except Exception as e:
                 print(f"Screen analyze failed: {e}")
             time.sleep(random.randint(

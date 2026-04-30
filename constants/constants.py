@@ -1,5 +1,6 @@
 GLOBAL_FPS = 60
 BUNNY_ICON = "assets/icon.png"
+BUNNY_ICON_ICO = "assets/icon.ico"
 BUNNY_IDLE_PNG = "assets/BunnyIdle.png"
 BUNNY_JUMP_PNG = "assets/BunnyJump.png"
 BUNNY_FLOATING_PNG = "assets/BunnyFloating.png"

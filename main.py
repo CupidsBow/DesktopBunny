@@ -168,12 +168,44 @@ class World:
         )
     
     def _set_icon(self):
-        if os.path.exists(self.ICON_PATH):
+        icon_path = self.ICON_PATH
+        if getattr(sys, "frozen", False):
+            icon_path = os.path.join(sys._MEIPASS, self.ICON_PATH)
+        if os.path.exists(icon_path):
             try:
-                icon = pygame.image.load(self.ICON_PATH)
+                icon = pygame.image.load(icon_path)
                 pygame.display.set_icon(icon)
             except Exception as e:
                 print(f"set icon failed: {e}")
+
+        ico_path = constants.BUNNY_ICON_ICO
+        if getattr(sys, "frozen", False):
+            ico_path = os.path.join(sys._MEIPASS, constants.BUNNY_ICON_ICO)
+        self._set_win32_icon(ico_path)
+
+    def _set_win32_icon(self, icon_path: str):
+        if not os.path.exists(icon_path):
+            return
+
+        try:
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x00000010
+            hicon = ctypes.windll.user32.LoadImageW(
+                None,
+                icon_path,
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE
+            )
+            if hicon:
+                ctypes.windll.user32.SendMessageW(self.hwnd, WM_SETICON, ICON_SMALL, hicon)
+                ctypes.windll.user32.SendMessageW(self.hwnd, WM_SETICON, ICON_BIG, hicon)
+        except Exception as e:
+            print(f"set win32 icon failed: {e}")
 
     def _set_transparent(self):
         GWL_EXSTYLE = -20

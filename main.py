@@ -73,6 +73,8 @@ class World:
         self.platform_detect_thread.start()
         self.screen_analyze_thread = threading.Thread(target=self._screen_analyze_loop, daemon=True)
         self.screen_analyze_thread.start()
+        self.fresh_tray_menu_thread = threading.Thread(target=self._refresh_tray_menu_loop, daemon=True)
+        self.fresh_tray_menu_thread.start()
     
     def _start_tray(self):
         def _run_tray():
@@ -289,6 +291,11 @@ class World:
                 constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS, 
                 constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS
             ))
+
+    def _refresh_tray_menu_loop(self):
+        while self.running:
+            self._refresh_tray_menu()
+            time.sleep(3)
 
     def update(self, delta: float):
         for event in pygame.event.get():

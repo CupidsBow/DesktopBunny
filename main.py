@@ -127,16 +127,16 @@ class World:
         control_items = [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
-                "Detect platforms",
+                "平台检测",
                 self._on_tray_toggle_platform_detection,
                 checked=lambda item: self.detect_platforms_enabled
             ),
             pystray.MenuItem(
-                "Read screen (Ollama needed)",
+                "读屏幕（需要 Ollama）",
                 self._on_tray_toggle_screen_analysis,
                 checked=lambda item: self.screen_analyze_enabled
             ),
-            pystray.MenuItem("Quit", self._on_tray_exit)
+            pystray.MenuItem("退出", self._on_tray_exit)
         ]
 
         return pystray.Menu(*(bunny_items + control_items))

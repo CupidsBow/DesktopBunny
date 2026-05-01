@@ -12,6 +12,7 @@ from constants import constants
 from tools.platform_detector import PlatformDetector
 import random
 import functools
+from tools.save_manager import SaveManager
 
 
 class World:
@@ -36,6 +37,7 @@ class World:
         self.screen_analyze_enabled = True
 
         self.detector = PlatformDetector()
+        self.save_manager = SaveManager()
 
     def startup(self):
         pygame.init()
@@ -65,16 +67,27 @@ class World:
 
         self.running = True
 
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Blossom"))
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Bubble"))
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Buttercup"))
+        bunny_data = self.save_manager.load()
+        print(bunny_data)
+        if bunny_data == {}:
+            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Blossom"))
+            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Bubble"))
+            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Buttercup"))
+        else:
+            for name, data in bunny_data.items():
+                bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), name)
+                bunny.satiety = data.get("satiety", bunny.satiety)
+                self.bunnies.append(bunny)
+        
         self._start_tray()
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
         self.platform_detect_thread.start()
         self.screen_analyze_thread = threading.Thread(target=self._screen_analyze_loop, daemon=True)
         self.screen_analyze_thread.start()
-        self.fresh_tray_menu_thread = threading.Thread(target=self._refresh_tray_menu_loop, daemon=True)
-        self.fresh_tray_menu_thread.start()
+        self.refresh_tray_menu_thread = threading.Thread(target=self._refresh_tray_menu_loop, daemon=True)
+        self.refresh_tray_menu_thread.start()
+        self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
+        self.auto_save_thread.start()
     
     def _start_tray(self):
         def _run_tray():
@@ -297,6 +310,19 @@ class World:
             self._refresh_tray_menu()
             time.sleep(3)
 
+    def _auto_save_loop(self):
+        while self.running:
+            self.save_bunny_info()
+            time.sleep(60)
+
+    def save_bunny_info(self):
+        data = {}
+        for bunny in self.bunnies:
+            data[bunny.name] = {
+                "satiety": bunny.satiety
+            }
+        self.save_manager.save(data)
+
     def update(self, delta: float):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -329,6 +355,7 @@ class World:
         pygame.display.flip()
         
     def shutdown(self):
+        self.save_bunny_info()
         if self.tray_icon:
             self.tray_icon.stop()
         pygame.quit()

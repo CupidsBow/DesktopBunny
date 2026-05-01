@@ -1,3 +1,5 @@
+import os
+
 GLOBAL_FPS = 60
 BUNNY_ICON = "assets/icon.png"
 BUNNY_ICON_ICO = "assets/icon.ico"
@@ -15,3 +17,4 @@ BUNNY_MAX_NUM = 5
 PLATFORM_MAX_NUM = 10
 SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS = 20
 SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS = 40
+DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')

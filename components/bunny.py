@@ -22,7 +22,7 @@ class BunnyState(Enum):
     GIRL_FALLING = 7
 
 class Bunny:
-    def __init__(self, screen_size: pygame.math.Vector2, name):
+    def __init__(self, screen_size: pygame.math.Vector2, name, satiety=80):
         self.GRAVITY = pygame.math.Vector2(0.0, 200.0)
         self.JUMP_VELOCITY = -self.GRAVITY * 1.0
         self.MOVE_VELOCITY = pygame.math.Vector2(50.0, 0.0)
@@ -32,7 +32,7 @@ class Bunny:
 
         self.name = name
         # 饱食度，范围 0-100，初始为 80，每 60 秒减少 1 点
-        self.satiety = 80
+        self.satiety = satiety
         self.satiety_timer = 60.0
 
         self.bunny_size = pygame.math.Vector2(48.0, 64.0)

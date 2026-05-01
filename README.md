@@ -6,9 +6,10 @@
 
 - 在底部任务栏随机游走
 - 检测屏幕上可以支撑的位置并跳上去
-- 点击 Bunny 使其跳跃
+- 点击静止状态的 Bunny 使其跳跃
 - 读取屏幕内容并吐槽（需要连接Ollama）
-- 加了饱食度，可以拖动文件名含有 carrot 的文件来恢复 Bunny 的饱食度
+- 加了饱食度，可以拖动文件至 Bunny 来喂食恢复 Bunny 的饱食度（会销毁文件，不进入回收站）
+- 点击眯眼下蹲状态的 Bunny 可以使其变成兔娘（需要 50 以上饱食度）
 - 给 Bunny 加了名字：Blossom、Bubble、Buttercup，名字 neta 自 1998 年的动画 The Powerpuff Girls
 
 ## Quick Start

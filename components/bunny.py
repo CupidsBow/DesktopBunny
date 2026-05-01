@@ -31,8 +31,8 @@ class Bunny:
         self.BUNNY_GIRL_ACCELERATION = self.BUNNY_GIRL_MAX_SPEED
 
         self.name = name
-        # 饱食度，范围 0-100，初始为 50，每 60 秒减少 1 点
-        self.satiety = 50
+        # 饱食度，范围 0-100，初始为 80，每 60 秒减少 1 点
+        self.satiety = 80
         self.satiety_timer = 60.0
 
         self.bunny_size = pygame.math.Vector2(48.0, 64.0)
@@ -239,7 +239,15 @@ class Bunny:
 
         if self.current_velocity.length() > 0.0:
             self.current_position += self.current_velocity * delta
-            self.current_velocity = self.current_velocity.normalize() * max(0.0, self.current_velocity.length() - self.BUNNY_GIRL_ACCELERATION * delta)
+            self.current_velocity = self.current_velocity.normalize() * max(0.0, self.current_velocity.length() - self.BUNNY_GIRL_ACCELERATION * 4.0 * delta)
+            if self.current_direction == -1 and self.get_bunny_left_x() <= 0:
+                self.current_direction = -self.current_direction
+                self.current_velocity.x = -self.current_velocity.x
+                self.sprite.flip_h = (self.current_direction == 1)
+            if self.current_direction == 1 and self.get_bunny_right_x() >= self.SCREEN_SIZE.x:
+                self.current_direction = -self.current_direction
+                self.current_velocity.x = -self.current_velocity.x
+                self.sprite.flip_h = (self.current_direction == 1)
         
         self.idle_timer -= delta
 
@@ -336,6 +344,7 @@ class Bunny:
     def enter_girl_move(self):
         self.anim_player.play(self.sprite, "BunnyGirlMove")
         self.current_direction = random.randint(0, 1) * 2 - 1
+        self.sprite.flip_h = (self.current_direction == 1)
         self.move_timer = random.uniform(3.0, 5.0)
         self.current_velocity = pygame.math.Vector2(self.current_direction, 0.0)
     

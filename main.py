@@ -126,8 +126,6 @@ class World:
         # ② 固定菜单项（不变）
         control_items = [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
-            pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
             pystray.MenuItem(
                 "Detect platforms",
                 self._on_tray_toggle_platform_detection,
@@ -142,16 +140,6 @@ class World:
         ]
 
         return pystray.Menu(*(bunny_items + control_items))
-
-    def _on_tray_add_bunny(self):
-        if self.bunnies and len(self.bunnies) < constants.BUNNY_MAX_NUM:
-            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
-            self._refresh_tray_menu()  # 新增这行
-
-    def _on_tray_delete_bunny(self):
-        if self.bunnies and len(self.bunnies) > 1:
-            self.bunnies.pop()
-            self._refresh_tray_menu()  # 新增这行
 
     def _on_tray_toggle_platform_detection(self, *args):
         self.detect_platforms_enabled = not self.detect_platforms_enabled

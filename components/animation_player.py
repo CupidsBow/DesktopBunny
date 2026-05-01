@@ -8,6 +8,8 @@ class AnimationPlayer:
         self.FLOATING_SPRITE = Sprite(constants.BUNNY_FLOATING_PNG, 4)
         self.FALLING_SPRITE = Sprite(constants.BUNNY_FALLING_PNG, 4)
         self.SPECIAL_SPRITE = Sprite(constants.BUNNY_SPECIAL_PNG, 4)
+        self.BUNNY_GIRL_IDLE_SPRITE = Sprite(constants.BUNNY_GIRL_IDLE_PNG, 6, 64)
+        self.BUNNY_GIRL_MOVE_SPRITE = Sprite(constants.BUNNY_GIRL_MOVE_PNG, 5, 64)
 
         self.fps = 6
         self.current_anim = "Idle"
@@ -38,6 +40,14 @@ class AnimationPlayer:
                 self.current_playing_sprite.frame_sprites = self.SPECIAL_SPRITE.frame_sprites
                 self.current_playing_sprite.flipped_frame_sprites = self.SPECIAL_SPRITE.flipped_frame_sprites
                 self.current_playing_sprite.total_frames = self.SPECIAL_SPRITE.total_frames
+            case "BunnyGirlIdle":
+                self.current_playing_sprite.frame_sprites = self.BUNNY_GIRL_IDLE_SPRITE.frame_sprites
+                self.current_playing_sprite.flipped_frame_sprites = self.BUNNY_GIRL_IDLE_SPRITE.flipped_frame_sprites
+                self.current_playing_sprite.total_frames = self.BUNNY_GIRL_IDLE_SPRITE.total_frames
+            case "BunnyGirlMove":
+                self.current_playing_sprite.frame_sprites = self.BUNNY_GIRL_MOVE_SPRITE.frame_sprites
+                self.current_playing_sprite.flipped_frame_sprites = self.BUNNY_GIRL_MOVE_SPRITE.flipped_frame_sprites
+                self.current_playing_sprite.total_frames = self.BUNNY_GIRL_MOVE_SPRITE.total_frames
         self.current_playing_sprite.current_frame = 0
         self.next_frame_timer = 0.0
     

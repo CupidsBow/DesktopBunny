@@ -17,20 +17,25 @@ class BunnyState(Enum):
     FLOATING = 2
     FALLING = 3
     SPECIAL = 4
+    GIRL_IDLE = 5
+    GIRL_MOVE = 6
+    GIRL_FALLING = 7
 
 class Bunny:
     def __init__(self, screen_size: pygame.math.Vector2, name):
         self.GRAVITY = pygame.math.Vector2(0.0, 200.0)
         self.JUMP_VELOCITY = -self.GRAVITY * 1.0
         self.MOVE_VELOCITY = pygame.math.Vector2(50.0, 0.0)
-        self.BUNNY_SIZE = pygame.math.Vector2(48.0, 64.0)
         self.SCREEN_SIZE = screen_size
+        self.BUNNY_GIRL_MAX_SPEED = 150.0
+        self.BUNNY_GIRL_ACCELERATION = self.BUNNY_GIRL_MAX_SPEED
 
         self.name = name
-        # 饱食度，范围 0-100，初始为 50，每 30 秒减少 1 点
+        # 饱食度，范围 0-100，初始为 50，每 60 秒减少 1 点
         self.satiety = 50
-        self.satiety_timer = 30.0
+        self.satiety_timer = 60.0
 
+        self.bunny_size = pygame.math.Vector2(48.0, 64.0)
         self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8)
         self.current_state = BunnyState.IDLE
         self.current_position = pygame.math.Vector2(
@@ -41,6 +46,7 @@ class Bunny:
         self.current_direction = random.randint(0, 1) * 2 - 1
         self.sprite.flip_h = (self.current_direction == 1)
         self.idle_timer = 0.0
+        self.move_timer = 0.0
         self.special_timer = 0.0
         self.jump_cnt = 0
         self.huge_jump_flag = False
@@ -86,7 +92,7 @@ class Bunny:
             font = pygame.font.Font(None, 22)
         
         # 气泡位置（兔子头上方）
-        bunny_top = self.current_position.y - self.BUNNY_SIZE.y / 2
+        bunny_top = self.current_position.y - self.bunny_size.y / 2
         bubble_x = self.current_position.x
         bubble_y = bunny_top - 50
         
@@ -152,6 +158,12 @@ class Bunny:
                 self.update_falling(delta)
             case BunnyState.SPECIAL:
                 self.update_special(delta)
+            case BunnyState.GIRL_IDLE:
+                self.update_girl_idle(delta)
+            case BunnyState.GIRL_MOVE:
+                self.update_girl_move(delta)
+            case BunnyState.GIRL_FALLING:
+                self.update_girl_falling(delta)
 
     def draw(self, delta: float, screen: pygame.Surface):
         image = self.sprite.get_draw_image()
@@ -220,11 +232,65 @@ class Bunny:
             self.change_state(BunnyState.IDLE)
             return
 
+    def update_girl_idle(self, delta: float):
+        if not self.is_on_floor_and_adjust_y():
+            self.change_state(BunnyState.GIRL_FALLING)
+            return
+
+        if self.current_velocity.length() > 0.0:
+            self.current_position += self.current_velocity * delta
+            self.current_velocity = self.current_velocity.normalize() * max(0.0, self.current_velocity.length() - self.BUNNY_GIRL_ACCELERATION * delta)
+        
+        self.idle_timer -= delta
+
+        if self.idle_timer <= 0.0:
+            self.change_state(BunnyState.GIRL_MOVE)
+            return
+        
+        if self.satiety < 50:
+            self.set_comment("饿死了呜呜~变回兔兔了~")
+            self.change_state(BunnyState.IDLE)
+            return
+    
+    def update_girl_move(self, delta: float):
+        self.current_position += self.current_velocity * delta
+        self.current_velocity = self.current_velocity.normalize() * min(self.BUNNY_GIRL_MAX_SPEED, self.current_velocity.length() + self.BUNNY_GIRL_ACCELERATION * delta)
+        self.move_timer -= delta
+
+        if self.current_direction == -1 and self.get_bunny_left_x() <= 0:
+            self.current_direction = -self.current_direction
+            self.current_velocity.x = -self.current_velocity.x
+            self.sprite.flip_h = (self.current_direction == 1)
+        if self.current_direction == 1 and self.get_bunny_right_x() >= self.SCREEN_SIZE.x:
+            self.current_direction = -self.current_direction
+            self.current_velocity.x = -self.current_velocity.x
+            self.sprite.flip_h = (self.current_direction == 1)
+
+        if self.move_timer <= 0.0:
+            self.change_state(BunnyState.GIRL_IDLE)
+            return
+    
+    def update_girl_falling(self, delta: float):
+        self.current_velocity += self.GRAVITY * delta
+        self.current_position += self.current_velocity * delta
+        if self.current_direction == -1 and self.get_bunny_left_x() <= 0:
+            self.current_direction = -self.current_direction
+            self.current_velocity.x = -self.current_velocity.x
+            self.sprite.flip_h = (self.current_direction == 1)
+        if self.current_direction == 1 and self.get_bunny_right_x() >= self.SCREEN_SIZE.x:
+            self.current_direction = -self.current_direction
+            self.current_velocity.x = -self.current_velocity.x
+            self.sprite.flip_h = (self.current_direction == 1)
+        if self.is_on_floor_and_adjust_y():
+            self.change_state(BunnyState.GIRL_IDLE)
+            return
+
     def enter_idle(self):
         self.anim_player.play(self.sprite, "Idle")
         
         self.current_velocity = pygame.math.Vector2(0.0, 0.0)
         self.idle_timer = random.uniform(5.0, 15.0)
+        self.bunny_size = pygame.math.Vector2(48.0, 64.0)
 
     def enter_jump(self):
         self.anim_player.play(self.sprite, "Jump")
@@ -261,6 +327,21 @@ class Bunny:
         self.anim_player.play(self.sprite, "Special")
         self.special_timer = random.uniform(3.0, 5.0)
 
+    def enter_girl_idle(self):
+        self.anim_player.play(self.sprite, "BunnyGirlIdle")
+        self.idle_timer = random.uniform(10.0, 15.0)
+        self.current_velocity.y = 0.0
+        self.bunny_size = pygame.math.Vector2(48.0, 144.0)
+
+    def enter_girl_move(self):
+        self.anim_player.play(self.sprite, "BunnyGirlMove")
+        self.current_direction = random.randint(0, 1) * 2 - 1
+        self.move_timer = random.uniform(3.0, 5.0)
+        self.current_velocity = pygame.math.Vector2(self.current_direction, 0.0)
+    
+    def enter_girl_falling(self):
+        self.anim_player.play(self.sprite, "BunnyGirlIdle")
+
     def exit_idle(self):
         pass
 
@@ -276,6 +357,15 @@ class Bunny:
     def exit_special(self):
         pass
 
+    def exit_girl_idle(self):
+        pass
+
+    def exit_girl_move(self):
+        pass
+    
+    def exit_girl_falling(self):
+        pass
+
     def change_state(self, new_state: BunnyState):
         match self.current_state:
             case BunnyState.IDLE:
@@ -288,6 +378,12 @@ class Bunny:
                 self.exit_falling()
             case BunnyState.SPECIAL:
                 self.exit_special()
+            case BunnyState.GIRL_IDLE:
+                self.exit_girl_idle()
+            case BunnyState.GIRL_MOVE:
+                self.exit_girl_move()
+            case BunnyState.GIRL_FALLING:
+                self.exit_girl_falling()
         self.current_state = new_state
         match self.current_state:
             case BunnyState.IDLE:
@@ -300,15 +396,21 @@ class Bunny:
                 self.enter_falling()
             case BunnyState.SPECIAL:
                 self.enter_special()
+            case BunnyState.GIRL_IDLE:
+                self.enter_girl_idle()
+            case BunnyState.GIRL_MOVE:
+                self.enter_girl_move()
+            case BunnyState.GIRL_FALLING:
+                self.enter_girl_falling()
 
     def get_bunny_bottom_y(self) -> float:
-        return self.current_position.y + self.BUNNY_SIZE.y / 2.0
+        return self.current_position.y + self.bunny_size.y / 2.0
 
     def get_bunny_left_x(self) -> float:
-        return self.current_position.x - self.BUNNY_SIZE.x / 2.0
+        return self.current_position.x - self.bunny_size.x / 2.0
 
     def get_bunny_right_x(self) -> float:
-        return self.current_position.x + self.BUNNY_SIZE.x / 2.0
+        return self.current_position.x + self.bunny_size.x / 2.0
 
     def is_on_floor_and_adjust_y(self) -> bool:
         for platform in self.platforms:
@@ -316,7 +418,7 @@ class Bunny:
             and self.get_bunny_bottom_y() >= platform.get_top_y() \
             and self.get_bunny_left_x() <= platform.get_right_x() \
             and self.get_bunny_right_x() >= platform.get_left_x():
-                self.current_position.y = platform.get_top_y() - self.BUNNY_SIZE.y / 2.0 + 1.0
+                self.current_position.y = platform.get_top_y() - self.bunny_size.y / 2.0 + 1.0
                 return True
         return False
     
@@ -335,25 +437,38 @@ class Bunny:
         return bunny_rect.collidepoint(pos)
 
     def on_clicked(self):
-        if self.current_state == BunnyState.IDLE or self.current_state == BunnyState.SPECIAL:
+        if self.current_state == BunnyState.IDLE:
             self.idle_timer = 0.0
             self.special_timer = 0.0
             self.jump_cnt = random.randint(3, 5)
             self.huge_jump_flag = (random.randint(0, 100) < 80)
             self.change_state(BunnyState.JUMP)
             return
+        elif self.current_state == BunnyState.SPECIAL:
+            if self.satiety >= 50:
+                self.set_comment("嗷呜~变成人啦~")
+                self.current_position = self.current_position + pygame.math.Vector2(0.0, -50.0)
+                self.change_state(BunnyState.GIRL_IDLE)
+                return
+            else:
+                self.set_comment("哼~不喂我吃的还想让我变人~")
+                return
+        elif self.current_state == BunnyState.GIRL_IDLE:
+            self.set_comment("嗷呜~变回兔兔啦~")
+            self.change_state(BunnyState.IDLE)
+            return
 
     def eat_carrot(self, carrot_path=None):
         if carrot_path and os.path.isfile(carrot_path):
             try:
                 carrot_name = os.path.basename(carrot_path)
-                if "carrot" in carrot_name.lower():
-                    os.remove(carrot_path)
-                    self.satiety = min(self.satiety + 10, 100)
-                    self.set_comment("嗷呜~好甜的萝卜呀~")
-                    print(f"carrot eaten: {carrot_path}, current satiety: {self.satiety}")
-                else:
-                    self.set_comment("我不吃萝卜以外的东西~")
-                    print(f"File is not a carrot: {carrot_path}")
+                # if "carrot" in carrot_name.lower():
+                os.remove(carrot_path)
+                self.satiety = min(self.satiety + 20, 100)
+                self.set_comment("嗷呜~好甜的萝卜呀~")
+                print(f"carrot eaten: {carrot_path}, current satiety: {self.satiety}")
+                # else:
+                #     self.set_comment("我不吃萝卜以外的东西~")
+                #     print(f"File is not a carrot: {carrot_path}")
             except Exception as e:
                 print(f"Failed to delete file: {e}")

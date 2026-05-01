@@ -6,8 +6,10 @@
 
 - 在底部任务栏随机游走
 - 检测屏幕上可以支撑的位置并跳上去
-- 点击Bunny使其跳跃
+- 点击 Bunny 使其跳跃
 - 读取屏幕内容并吐槽（需要连接Ollama）
+- 加了饱食度，可以拖动文件名含有 carrot 的文件来恢复 Bunny 的饱食度
+- 给 Bunny 加了名字：Blossom、Bubble、Buttercup，名字 neta 自 1998 年的动画 The Powerpuff Girls
 
 ## Quick Start
 安装 Python 3.13.13

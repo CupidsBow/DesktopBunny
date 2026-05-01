@@ -19,12 +19,17 @@ class BunnyState(Enum):
     SPECIAL = 4
 
 class Bunny:
-    def __init__(self, screen_size: pygame.math.Vector2):
+    def __init__(self, screen_size: pygame.math.Vector2, name):
         self.GRAVITY = pygame.math.Vector2(0.0, 200.0)
         self.JUMP_VELOCITY = -self.GRAVITY * 1.0
         self.MOVE_VELOCITY = pygame.math.Vector2(50.0, 0.0)
         self.BUNNY_SIZE = pygame.math.Vector2(48.0, 64.0)
         self.SCREEN_SIZE = screen_size
+
+        self.name = name
+        # 饱食度，范围 0-100，初始为 50，每 30 秒减少 1 点
+        self.satiety = 50
+        self.satiety_timer = 30.0
 
         self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8)
         self.current_state = BunnyState.IDLE
@@ -129,6 +134,11 @@ class Bunny:
             self.comment_display_timer -= delta
             if self.comment_display_timer <= 0:
                 self.current_comment = None
+
+        self.satiety_timer -= delta
+        if self.satiety_timer <= 0:
+            self.satiety_timer = 30.0
+            self.satiety = max(0, self.satiety - 1)
 
         self.anim_player.update(delta)
         match self.current_state:
@@ -311,18 +321,19 @@ class Bunny:
         return False
     
     def handle_click(self, mouse_pos: tuple) -> bool:
-        image = self.sprite.get_draw_image()
-        draw_x = self.current_position.x - image.get_width() / 2
-        draw_y = self.current_position.y - image.get_height() / 2
-        
-        # 兔子矩形区域
-        bunny_rect = pygame.Rect(draw_x, draw_y, image.get_width(), image.get_height())
-        
-        if bunny_rect.collidepoint(mouse_pos):
+        if self.is_position_inside_bunny(mouse_pos):
             self.on_clicked()
             return True
         return False
     
+    def is_position_inside_bunny(self, pos: tuple) -> bool:
+        image = self.sprite.get_draw_image()
+        draw_x = self.current_position.x - image.get_width() / 2
+        draw_y = self.current_position.y - image.get_height() / 2
+        
+        bunny_rect = pygame.Rect(draw_x, draw_y, image.get_width(), image.get_height())
+        return bunny_rect.collidepoint(pos)
+
     def on_clicked(self):
         if self.current_state == BunnyState.IDLE or self.current_state == BunnyState.SPECIAL:
             self.idle_timer = 0.0
@@ -331,3 +342,18 @@ class Bunny:
             self.huge_jump_flag = (random.randint(0, 100) < 80)
             self.change_state(BunnyState.JUMP)
             return
+
+    def eat_carrot(self, carrot_path=None):
+        if carrot_path and os.path.isfile(carrot_path):
+            try:
+                carrot_name = os.path.basename(carrot_path)
+                if "carrot" in carrot_name.lower():
+                    os.remove(carrot_path)
+                    self.satiety = min(self.satiety + 10, 100)
+                    self.set_comment("嗷呜~好甜的萝卜呀~")
+                    print(f"carrot eaten: {carrot_path}, current satiety: {self.satiety}")
+                else:
+                    self.set_comment("我不吃萝卜以外的东西~")
+                    print(f"File is not a carrot: {carrot_path}")
+            except Exception as e:
+                print(f"Failed to delete file: {e}")

@@ -14,29 +14,36 @@ class ScreenAnalyzer:
         self.model = model
         self.api_url = "http://localhost:11434/api/generate"
 
-    def _build_prompt(self) -> str:
+    def _build_prompt(self, bunny=None) -> str:
         """根据当前北京时间构建带时间感知的提示词"""
         beijing_hour = datetime.now(timezone(timedelta(hours=8))).hour
         
         if beijing_hour < 6:
-            time_feeling = "深夜"
+            bunny_feeling = "深夜"
         elif beijing_hour < 9:
-            time_feeling = "早上"
+            bunny_feeling = "早上"
         elif beijing_hour < 12:
-            time_feeling = "上午"
+            bunny_feeling = "上午"
         elif beijing_hour < 14:
-            time_feeling = "午后"
+            bunny_feeling = "午后"
         elif beijing_hour < 18:
-            time_feeling = "下午"
+            bunny_feeling = "下午"
         elif beijing_hour < 20:
-            time_feeling = "傍晚"
+            bunny_feeling = "傍晚"
         elif beijing_hour < 23:
-            time_feeling = "晚上"
+            bunny_feeling = "晚上"
         else:
-            time_feeling = "深夜"
+            bunny_feeling = "深夜"
+        
+        if bunny.satiety < 20:
+            bunny_feeling += "，并且你肚子特别饿了"
+        elif bunny.satiety < 50:
+            bunny_feeling += "，并且你有点饿了"
+        else:
+            bunny_feeling += "，并且你吃得饱饱的"
 
-        return f"""你是图片里的兔子桌宠。现在是{time_feeling}。
-看这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
+        return f"""你是图片里的兔子桌宠，名字是{bunny.name}。现在是{bunny_feeling}。
+结合这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
 要求：
 - 语气可爱、像宠物
 - 30字以内
@@ -54,14 +61,14 @@ class ScreenAnalyzer:
         pil_img.save(buffer, format="JPEG", quality=40)
         return base64.b64encode(buffer.getvalue()).decode()
 
-    def analyze(self, detector) -> str:
+    def analyze(self, detector, bunny) -> str:
         """分析屏幕，返回吐槽文案"""
         try:
             image_b64 = self.capture_and_encode(detector)
 
             payload = {
                 "model": self.model,
-                "prompt": self._build_prompt(),  # ✅ 动态生成带时间的 prompt
+                "prompt": self._build_prompt(bunny),  # ✅ 动态生成带时间的 prompt
                 "images": [image_b64],
                 "stream": False,
                 "options": {

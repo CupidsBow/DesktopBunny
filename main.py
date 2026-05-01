@@ -11,6 +11,7 @@ import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
 import random
+import functools
 
 
 class World:
@@ -47,6 +48,7 @@ class World:
         )
         
         self.screen = pygame.display.set_mode(self.window_size, pygame.NOFRAME)
+        pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.DROPFILE])
         self.clock = pygame.time.Clock()
         self.last_frame_time = pygame.time.get_ticks()
         
@@ -59,15 +61,14 @@ class World:
         self._set_always_on_top()
         self._position_to_work_area()
         
-        self._start_tray()
-        
         ctypes.windll.user32.ShowWindow(self.hwnd, 5)
 
         self.running = True
 
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
+        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Blossom"))
+        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Bubble"))
+        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Buttercup"))
+        self._start_tray()
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
         self.platform_detect_thread.start()
         self.screen_analyze_thread = threading.Thread(target=self._screen_analyze_loop, daemon=True)
@@ -82,25 +83,10 @@ class World:
                 image = Image.open(true_icon_path)
             else:
                 image = Image.new('RGB', (64, 64), (255, 0, 0))
+
+            # 用新的方法生成初始菜单
+            menu = self._build_menu()
             
-            # 创建菜单
-            menu = pystray.Menu(
-                pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
-                pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
-                pystray.MenuItem(
-                    "Detect platforms",
-                    self._on_tray_toggle_platform_detection,
-                    checked=lambda item: self.detect_platforms_enabled
-                ),
-                pystray.MenuItem(
-                    "Read screen (Ollama needed)",
-                    self._on_tray_toggle_screen_analysis,
-                    checked=lambda item: self.screen_analyze_enabled
-                ),
-                pystray.MenuItem("Quit", self._on_tray_exit)
-            )
-            
-            # 创建托盘图标
             self.tray_icon = pystray.Icon(
                 "bunny",
                 image,
@@ -113,13 +99,59 @@ class World:
         self.tray_thread = threading.Thread(target=_run_tray, daemon=True)
         self.tray_thread.start()
     
+    def _on_tray_interact_bunny(self, icon, item, idx):
+        if 0 <= idx < len(self.bunnies):
+            self.bunnies[idx].set_comment(f"主人，{self.bunnies[idx].name}在这哦~")
+
+    def _refresh_tray_menu(self):
+        if not self.tray_icon:
+            return
+        self.tray_icon.menu = self._build_menu()
+        self.tray_icon.update_menu()
+
+    def _build_menu(self):
+        # ① 每只兔子的按钮
+        bunny_items = []
+        for i, bunny in enumerate(self.bunnies):
+            # 用 partial 固定 idx，生成 (icon, item, idx=i) 的回调
+            action = functools.partial(self._on_tray_interact_bunny, idx=i)
+            bunny_items.append(
+                pystray.MenuItem(
+                    # 文本仍然用 lambda 动态显示饱食度（这个可以继续用 lambda）
+                    lambda item, idx=i, name = bunny.name: f"🐰{name}: 饱食度 {int(self.bunnies[idx].satiety)}",
+                    action              # ← 这里换成 partial
+                )
+            )
+
+        # ② 固定菜单项（不变）
+        control_items = [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Add a bunny", self._on_tray_add_bunny),
+            pystray.MenuItem("Delete a bunny", self._on_tray_delete_bunny),
+            pystray.MenuItem(
+                "Detect platforms",
+                self._on_tray_toggle_platform_detection,
+                checked=lambda item: self.detect_platforms_enabled
+            ),
+            pystray.MenuItem(
+                "Read screen (Ollama needed)",
+                self._on_tray_toggle_screen_analysis,
+                checked=lambda item: self.screen_analyze_enabled
+            ),
+            pystray.MenuItem("Quit", self._on_tray_exit)
+        ]
+
+        return pystray.Menu(*(bunny_items + control_items))
+
     def _on_tray_add_bunny(self):
         if self.bunnies and len(self.bunnies) < constants.BUNNY_MAX_NUM:
             self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1])))
+            self._refresh_tray_menu()  # 新增这行
 
     def _on_tray_delete_bunny(self):
         if self.bunnies and len(self.bunnies) > 1:
             self.bunnies.pop()
+            self._refresh_tray_menu()  # 新增这行
 
     def _on_tray_toggle_platform_detection(self, *args):
         self.detect_platforms_enabled = not self.detect_platforms_enabled
@@ -259,9 +291,9 @@ class World:
         while self.running:
             try:
                 if self.screen_analyze_enabled:
-                    comment = analyzer.analyze(self.detector)
+                    comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
+                    comment = analyzer.analyze(self.detector, comment_bunny)
                     if comment:
-                        comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
                         comment_bunny.set_comment(comment)
             except Exception as e:
                 print(f"Screen analyze failed: {e}")
@@ -282,6 +314,13 @@ class World:
                     for i in range(len(self.bunnies)-1, -1, -1):
                         if self.bunnies[i].handle_click(event.pos):
                             break
+            elif event.type == pygame.DROPFILE:
+                file_path = event.file
+                mouse_pos = pygame.mouse.get_pos()
+                for bunny in self.bunnies:
+                    if bunny.is_position_inside_bunny(mouse_pos):
+                        bunny.eat_carrot(file_path)
+                        break
         
         for bunny in self.bunnies:
             bunny.update(delta)

@@ -164,6 +164,16 @@ class Bunny:
                 self.update_girl_move(delta)
             case BunnyState.GIRL_FALLING:
                 self.update_girl_falling(delta)
+        
+        if self.current_position.x < -1000 \
+        or self.current_position.y < -1000 \
+        or self.current_position.x > self.SCREEN_SIZE.x + 1000 \
+        or self.current_position.y > self.SCREEN_SIZE.y + 1000:
+            self.current_position = pygame.math.Vector2(
+                random.randint(int(self.SCREEN_SIZE.x / 4), int(self.SCREEN_SIZE.x * 3 / 4)),
+                0.0
+            )
+            self.current_velocity = pygame.math.Vector2(0.0, 0.0)
 
     def draw(self, delta: float, screen: pygame.Surface):
         image = self.sprite.get_draw_image()

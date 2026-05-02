@@ -68,7 +68,6 @@ class World:
         self.running = True
 
         bunny_data = self.save_manager.load()
-        print(bunny_data)
         if bunny_data == {}:
             self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Blossom"))
             self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Bubble"))

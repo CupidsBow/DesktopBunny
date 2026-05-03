@@ -11,8 +11,6 @@ class ChatWindow:
     def __init__(self, master, world):
         self.master = master
         self.world = world
-        self.world.detect_platforms_enabled = False
-        self.world.screen_analyze_enabled = False
         self.is_waiting_reply = False
 
         # ========== 新增：让任务栏图标生效（Windows 专属） ==========
@@ -209,8 +207,3 @@ class ChatWindow:
         for msg in self.model_manager.chat_history:
             self._append_message("我" if msg["role"] == "user" else "Alice", msg["content"])
         self.chat_display.config(state='disabled')
-
-    def on_closing(self):
-        self.master.destroy()
-        self.world.detect_platforms_enabled = True
-        self.world.screen_analyze_enabled = True

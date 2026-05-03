@@ -42,6 +42,8 @@ class World:
         self.detector = PlatformDetector()
         self.save_manager = SaveManager()
         self.model_manager = ModelManager(self.detector)
+        self.chat_root = None
+        self.chat_window_thread = None
 
     def startup(self):
         pygame.init()
@@ -143,6 +145,12 @@ class World:
         control_items = [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
+                "打开聊天（需要 Ollama）",               # 虽然不可见，但最好保留文字便于调试
+                self._on_tray_open_chat_window,
+                default=True,             # 设为默认，左键单击时触发
+                visible=False            # 在右键菜单中不可见
+            ),
+            pystray.MenuItem(
                 "平台检测",
                 self._on_tray_toggle_platform_detection,
                 checked=lambda item: self.detect_platforms_enabled
@@ -152,7 +160,7 @@ class World:
                 self._on_tray_toggle_screen_analysis,
                 checked=lambda item: self.screen_analyze_enabled
             ),
-            pystray.MenuItem("交互", self._on_tray_open_chat_window),
+            pystray.MenuItem("交互（需要 Ollama）", self._on_tray_open_chat_window),
             pystray.MenuItem("退出", self._on_tray_exit)
         ]
 
@@ -168,14 +176,40 @@ class World:
         self.screen_analyze_enabled = not self.screen_analyze_enabled
 
     def _on_tray_open_chat_window(self):
-        threading.Thread(target=self._create_chat_window, daemon=True).start()
+        """托盘菜单：打开聊天窗口（如果已打开则激活）"""
+        self.detect_platforms_enabled = False
+        self.screen_analyze_enabled = False
+        if self.chat_root and self.chat_root.winfo_exists():
+            # 窗口已存在：恢复显示并置顶
+            self.chat_root.deiconify()
+            self.chat_root.lift()
+            return
+        # 不存在则启动专用线程创建
+        self.chat_window_thread = threading.Thread(
+            target=self._run_chat_window_loop, daemon=True
+        )
+        self.chat_window_thread.start()
     
-    def _create_chat_window(self):
+    def _run_chat_window_loop(self):
+        """在专用线程中运行 Tkinter 主循环"""
         root = tk.Tk()
-        # 实例化聊天界面
+
+        # 绑定关闭事件：隐藏窗口而不是销毁（避免线程退出）
+        root.protocol("WM_DELETE_WINDOW", lambda: self._hide_chat_window(root))
+
+        # 创建聊天界面
         self.chat_app = ChatWindow(root, self)
-        root.protocol("WM_DELETE_WINDOW", self.chat_app.on_closing)
+        self.chat_root = root
+
         root.mainloop()
+        # 用户真正关闭时才会到达这里（如果 destroy 被调用）
+        self.chat_root = None
+
+    def _hide_chat_window(self, root):
+        """隐藏聊天窗口（不销毁，保证线程安全）"""
+        root.withdraw()
+        self.detect_platforms_enabled = True
+        self.screen_analyze_enabled = True
 
     def _on_tray_exit(self):
         self.running = False

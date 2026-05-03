@@ -2,6 +2,8 @@
 
 ![Bunny](assets/header.png)
 
+模仿 Rabi-Ribi 风格画的兔兔
+
 ## Feature
 
 - 在底部任务栏随机游走

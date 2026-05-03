@@ -19,20 +19,27 @@
 
 ### 安装 Ollama 模型
 
-> ollama pull qwen3-vl:4b
-
-> ollama pull qwen3-vl:8b
-
-> ollama pull bge-m3
+```bash
+ollama pull qwen3-vl:4b
+```
+```bash
+ollama pull qwen3-vl:8b
+```
+```bash
+ollama pull bge-m3
+```
 
 ### 安装 Python 3.13.13
 
-> pip install -r requirements.txt
->
-> pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
+```bash
+pip install -r requirements.txt
+```
+```bash
+pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
+```
 
-运行`dist`目录下的`Bunny.exe`
+运行 dist 目录下的 Bunny.exe
 
 ## 连接 Ollama
 
-目前使用`qwen3-vl:4b`与`qwen3-vl:8b`模型交互，`bge-m3`进行向量化存储记忆，需要在 Ollama 安装模型并开放接口，Bunny 会自动尝试连接 Ollama
+目前使用 qwen3-vl:4b 与 qwen3-vl:8b 模型交互， bge-m3 进行向量化存储记忆，需要在 Ollama 安装模型并开放接口，Bunny 会自动尝试连接 Ollama

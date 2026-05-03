@@ -36,8 +36,8 @@ class World:
         self.bunnies = []
         self.tray_icon = None
         self.tray_thread = None
-        self.detect_platforms_enabled = False
-        self.screen_analyze_enabled = False
+        self.detect_platforms_enabled = True
+        self.screen_analyze_enabled = True
 
         self.detector = PlatformDetector()
         self.save_manager = SaveManager()
@@ -173,8 +173,8 @@ class World:
     def _create_chat_window(self):
         root = tk.Tk()
         # 实例化聊天界面
-        chat_app = ChatWindow(root, self)
-        root.protocol("WM_DELETE_WINDOW", chat_app.on_closing)
+        self.chat_app = ChatWindow(root, self)
+        root.protocol("WM_DELETE_WINDOW", self.chat_app.on_closing)
         root.mainloop()
 
     def _on_tray_exit(self):
@@ -368,6 +368,9 @@ class World:
         self.save_bunny_info()
         if self.tray_icon:
             self.tray_icon.stop()
+        self.chat_app.on_closing()
+        self.model_manager.archive_chat_range(0, len(self.model_manager.chat_history))
+        self.model_manager.quit_save_memory()
         pygame.quit()
         sys.exit()
         

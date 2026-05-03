@@ -7,10 +7,10 @@
 - 在底部任务栏随机游走
 - 检测屏幕上可以支撑的位置并跳上去
 - 点击静止状态的 Bunny 使其跳跃
-- 读取屏幕内容并吐槽（需要连接Ollama）
+- 读取屏幕内容并吐槽（需要连接 Ollama qwen3-vl:4b）
 - 加了饱食度（0 - 100）每 216 秒减少一点，可以拖动文件至 Bunny 来喂食恢复 Bunny 的饱食度（会销毁文件，不进入回收站）
 - 点击眯眼下蹲状态的 Bunny 可以使其变成兔娘（需要 50 以上饱食度）
-- 给 Bunny 加了名字：Blossom、Bubble、Buttercup，名字 neta 自 1998 年的动画 The Powerpuff Girls
+- 支持与 Bunny 交互，保存长期记忆（需要连接 Ollama qwen3-vl:8b）
 
 ## Quick Start
 安装 Python 3.13.13
@@ -19,8 +19,8 @@
 >
 > pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
 
-运行`dist`目录下的`main.exe`
+运行`dist`目录下的`Bunny.exe`
 
 ## 连接 Ollama
 
-解析屏幕内容需要连接本地的 Ollama，目前写死了使用`qwen3-vl:4b`模型，需要在 Ollama 安装`qwen3-vl:4b`模型并开放接口，Bunny 会自动尝试连接 Ollama
+目前使用`qwen3-vl:4b`与`qwen3-vl:8b`模型交互，`bge-m3`进行向量化存储记忆，需要在 Ollama 安装模型并开放接口，Bunny 会自动尝试连接 Ollama

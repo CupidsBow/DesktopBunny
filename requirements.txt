@@ -7,3 +7,4 @@ pystray==0.19.5
 opencv-python==4.13.0.92
 mss==10.2.0
 requests==2.33.1
+faiss-cpu==1.13.2

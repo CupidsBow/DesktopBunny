@@ -11,6 +11,8 @@ class ChatWindow:
         self.master = master
         self.world = world
 
+        self.is_waiting_reply = False
+
         # ========== 新增：让任务栏图标生效（Windows 专属） ==========
         myappid = "mycompany.myproduct.bunny"  # 随便写个唯一字符串
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
@@ -129,7 +131,7 @@ class ChatWindow:
     def update_send_btn_status(self, event=None):
         """输入框内容变化时，自动启用/禁用发送按钮"""
         content = self.entry.get("1.0", tk.END).strip()
-        if content:
+        if content and not self.is_waiting_reply:
             self.send_btn.config(
                 state=tk.NORMAL,
                 bg=self.NORMAL_BG,
@@ -172,11 +174,15 @@ class ChatWindow:
         return "break"
 
     def _get_bot_reply(self, user_text):
+        self.is_waiting_reply = True
+        self.update_send_btn_status()
         try:
             reply = self.model_manager.chat(user_text)
+            self.update_send_btn_status()
+            self.master.after(0, self._append_message, "Alice", reply)
         except Exception as e:
             reply = f"（聊天出错：{e}）"
-        self.master.after(0, self._append_message, "Bunny", reply)
+        self.is_waiting_reply = False
 
     def _append_message(self, sender, text):
         """消息展示优化"""
@@ -187,7 +193,7 @@ class ChatWindow:
         if sender == "我":
             self.chat_display.insert(tk.END, f"我：{text}\n")
         else:
-            self.chat_display.insert(tk.END, f"Bunny：{text}\n")
+            self.chat_display.insert(tk.END, f"Alice：{text}\n")
             
         self.chat_display.config(state='disabled')
         self.chat_display.see(tk.END)
@@ -196,7 +202,7 @@ class ChatWindow:
         self.chat_display.config(state='normal')
         self.chat_display.delete("1.0", tk.END)
         for msg in self.model_manager.chat_history:
-            self._append_message("我" if msg["role"] == "user" else "Bunny", msg["content"])
+            self._append_message("我" if msg["role"] == "user" else "Alice", msg["content"])
         self.chat_display.config(state='disabled')
 
     def on_closing(self):

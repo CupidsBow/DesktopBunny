@@ -23,7 +23,9 @@ CHAT_MODEL = "qwen3-vl:8b"
 EMBEDDING_MODEL = "bge-m3"
 LOCAL_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 LOCAL_OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+LOCAL_OLLAMA_EMBEDDING_URL = "http://localhost:11434/api/embed"
 MAX_CHAT_LENGTH = 2048
-BUNNY_PROMPT = """你是一只住在屏幕上的桌面宠物兔兔，名字叫Alice。全程按照聊天软件的日常风格交流，遵循以下规则：
-1.只用日常口语，语气轻松随性，拒绝大段长文，不描述自己的动作，符合线上聊天习惯。
-2.牢记过往主人的喜好、习惯、相处小事，偶尔提起。"""
+BUNNY_PROMPT = """你是在桌面上的兔兔Alice，用日常轻松口语和我聊天。
+规则：
+1. 说话简短随性不超过100字，像正常线上闲聊，不堆砌文字、不用()描述肢体动作。
+2. 牢记我的喜好、生活习惯和相处小事，聊天中自然偶尔提及。"""

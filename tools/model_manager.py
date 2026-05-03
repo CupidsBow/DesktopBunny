@@ -78,7 +78,7 @@ class ModelManager:
         return f"""你是图片里的兔兔{bunny.name}。现在是{bunny_feeling}。
 结合这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
 要求：
-- 语气可爱、像宠物
+- 语气可爱
 - 30字以内
 - 不要描述画面，直接说评论
 - 直接输出评论文案，不要加任何前缀"""
@@ -305,9 +305,9 @@ class ModelManager:
         ])
 
         prompt = """请把以下对话内容，提炼成多条独立、简短、客观的事实，
-    只提取用户和助手的：习惯、偏好、禁忌、情况、需求、特点、状态、经历。
+    只提取用户和助手的：习惯、偏好、禁忌、特点。
     每条一句话，不超过20字，不要情绪，不要废话，不要序号，格式如下：
-        (用户/助手)(习惯/偏好/禁忌/情况/需求/特点/状态/经历)：xxx。
+        (用户/助手)(习惯/偏好/禁忌/特点)：xxx。
     不同主题必须分开成多条。
     只提炼出5条即可，其余内容可以摒弃。
 
@@ -362,8 +362,12 @@ class ModelManager:
         print(f"保存记忆 {summary.strip()}")
         return memory_id
 
-    def retrieve_memory(self, query: str, top_k=5) -> list:
-        """用当前问题检索最相关的长期记忆（ID完全正确）"""
+    def retrieve_memory(self, query: str, top_k=5, distance_threshold=0.6) -> list:
+        """
+        用当前问题检索最相关的长期记忆（ID完全正确）
+        :param distance_threshold: 距离阈值，越小越严格，越大越宽松
+        推荐默认值：0.6（通用场景）
+        """
         if self.index.ntotal == 0:
             return []
 
@@ -371,14 +375,19 @@ class ModelManager:
         emb_np = np.array([emb], dtype=np.float32)
         distances, retrieved_ids = self.index.search(emb_np, top_k)
 
-        # 直接用 FAISS 返回的真实 ID 去查 SQLite
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         memories = []
 
-        for mem_id in retrieved_ids[0]:
+        # 同时遍历 ID 和对应的距离
+        for mem_id, dist in zip(retrieved_ids[0], distances[0]):
             if mem_id <= 0:
                 continue
+            
+            # ✅ 关键：距离大于阈值 → 跳过（不相关）
+            if dist > distance_threshold:
+                continue
+
             c.execute("SELECT summary FROM memories WHERE id=?", (int(mem_id),))
             res = c.fetchone()
             if res:

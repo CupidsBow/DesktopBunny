@@ -4,6 +4,7 @@ import tkinter as tk
 from constants import constants
 import ctypes
 from PIL import Image, ImageTk
+import sys, os
 
 
 class ChatWindow:
@@ -28,7 +29,10 @@ class ChatWindow:
         # ========== 替换：同时设置窗口+任务栏图标 ==========
         # 假设 constants.BUNNY_ICON 是 .ico 或 .png 文件路径
         try:
-            img = Image.open(constants.BUNNY_ICON_ICO)
+            icon_ico_path = constants.BUNNY_ICON_ICO
+            if getattr(sys, "frozen", False):
+                icon_ico_path = os.path.join(sys._MEIPASS, constants.BUNNY_ICON_ICO)
+            img = Image.open(icon_ico_path)
             icon = ImageTk.PhotoImage(img)
             master.iconphoto(True, icon)  # True = 同时影响任务栏
             self.master.icon = icon  # 防止被垃圾回收

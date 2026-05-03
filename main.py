@@ -368,6 +368,7 @@ class World:
         self.save_bunny_info()
         if self.tray_icon:
             self.tray_icon.stop()
+        self.screen.fill(self.TRANSPARENT_COLOR)
         self.chat_app.on_closing()
         self.model_manager.archive_chat_range(0, len(self.model_manager.chat_history))
         self.model_manager.quit_save_memory()

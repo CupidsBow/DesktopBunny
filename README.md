@@ -1,6 +1,6 @@
 # Desktop Bunny
 
-![Bunny](assets/icon.png)
+![Bunny](assets/header.png)
 
 ## Feature
 
@@ -8,7 +8,7 @@
 - 检测屏幕上可以支撑的位置并跳上去
 - 点击静止状态的 Bunny 使其跳跃
 - 读取屏幕内容并吐槽（需要连接Ollama）
-- 加了饱食度，可以拖动文件至 Bunny 来喂食恢复 Bunny 的饱食度（会销毁文件，不进入回收站）
+- 加了饱食度（0 - 100）每 216 秒减少一点，可以拖动文件至 Bunny 来喂食恢复 Bunny 的饱食度（会销毁文件，不进入回收站）
 - 点击眯眼下蹲状态的 Bunny 可以使其变成兔娘（需要 50 以上饱食度）
 - 给 Bunny 加了名字：Blossom、Bubble、Buttercup，名字 neta 自 1998 年的动画 The Powerpuff Girls
 
@@ -17,7 +17,7 @@
 
 > pip install -r requirements.txt
 >
-> pyinstaller --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
+> pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
 
 运行`dist`目录下的`main.exe`
 

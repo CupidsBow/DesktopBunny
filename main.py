@@ -6,13 +6,16 @@ import os
 import threading
 import time
 from components.bunny import Bunny
+from components.chat_window import ChatWindow
 from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
+from tools.model_manager import ModelManager
 import random
 import functools
 from tools.save_manager import SaveManager
+import tkinter as tk
 
 
 class World:
@@ -33,11 +36,12 @@ class World:
         self.bunnies = []
         self.tray_icon = None
         self.tray_thread = None
-        self.detect_platforms_enabled = True
-        self.screen_analyze_enabled = True
+        self.detect_platforms_enabled = False
+        self.screen_analyze_enabled = False
 
         self.detector = PlatformDetector()
         self.save_manager = SaveManager()
+        self.model_manager = ModelManager(self.detector)
 
     def startup(self):
         pygame.init()
@@ -69,9 +73,7 @@ class World:
 
         bunny_data = self.save_manager.load()
         if bunny_data == {}:
-            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Blossom"))
-            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Bubble"))
-            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Buttercup"))
+            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Alice"))
         else:
             for name, data in bunny_data.items():
                 bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), name)
@@ -150,6 +152,7 @@ class World:
                 self._on_tray_toggle_screen_analysis,
                 checked=lambda item: self.screen_analyze_enabled
             ),
+            pystray.MenuItem("交互", self._on_tray_open_chat_window),
             pystray.MenuItem("退出", self._on_tray_exit)
         ]
 
@@ -163,6 +166,16 @@ class World:
 
     def _on_tray_toggle_screen_analysis(self, *args):
         self.screen_analyze_enabled = not self.screen_analyze_enabled
+
+    def _on_tray_open_chat_window(self):
+        threading.Thread(target=self._create_chat_window, daemon=True).start()
+    
+    def _create_chat_window(self):
+        root = tk.Tk()
+        # 实例化聊天界面
+        chat_app = ChatWindow(root, self)
+        root.protocol("WM_DELETE_WINDOW", chat_app.on_closing)
+        root.mainloop()
 
     def _on_tray_exit(self):
         self.running = False
@@ -288,19 +301,17 @@ class World:
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
 
     def _screen_analyze_loop(self):
-        from tools.screen_analyzer import ScreenAnalyzer
-        analyzer = ScreenAnalyzer()
         while self.running:
             try:
                 if self.screen_analyze_enabled:
                     comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
-                    comment = analyzer.analyze(self.detector, comment_bunny)
+                    comment = self.model_manager.analyze_screen(comment_bunny)
                     if comment:
                         comment_bunny.set_comment(comment)
             except Exception as e:
                 print(f"Screen analyze failed: {e}")
             time.sleep(random.randint(
-                constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS, 
+                constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS,
                 constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS
             ))
 

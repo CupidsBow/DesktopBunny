@@ -18,3 +18,12 @@ PLATFORM_MAX_NUM = 10
 SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS = 20
 SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS = 40
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
+SCREEN_ANALYZE_MODEL = "qwen3-vl:4b"
+CHAT_MODEL = "qwen3-vl:8b"
+EMBEDDING_MODEL = "bge-m3"
+LOCAL_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+LOCAL_OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+MAX_CHAT_LENGTH = 2048
+BUNNY_PROMPT = """你是一只住在屏幕上的桌面宠物兔兔，名字叫Alice。全程按照聊天软件的日常风格交流，遵循以下规则：
+1.只用日常口语，语气轻松随性，拒绝大段长文，不描述自己的动作，符合线上聊天习惯。
+2.牢记过往主人的喜好、习惯、相处小事，偶尔提起。"""

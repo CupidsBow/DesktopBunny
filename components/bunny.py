@@ -29,11 +29,12 @@ class Bunny:
         self.SCREEN_SIZE = screen_size
         self.BUNNY_GIRL_MAX_SPEED = 150.0
         self.BUNNY_GIRL_ACCELERATION = self.BUNNY_GIRL_MAX_SPEED
+        self.SATIETY_TIME = 216.0
 
         self.name = name
-        # 饱食度，范围 0-100，初始为 80，每 60 秒减少 1 点
+        # 饱食度，范围 0-100，初始为 80，每 216 秒减少 1 点 刚好 6 小时从 100 减少到 0
         self.satiety = satiety
-        self.satiety_timer = 60.0
+        self.satiety_timer = self.SATIETY_TIME
 
         self.bunny_size = pygame.math.Vector2(48.0, 64.0)
         self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8)
@@ -143,7 +144,7 @@ class Bunny:
 
         self.satiety_timer -= delta
         if self.satiety_timer <= 0:
-            self.satiety_timer = 30.0
+            self.satiety_timer = self.SATIETY_TIME
             self.satiety = max(0, self.satiety - 1)
 
         self.anim_player.update(delta)

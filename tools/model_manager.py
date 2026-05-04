@@ -233,7 +233,7 @@ class ModelManager:
         # 构建上下文：倒序加入历史，直到接近长度限制
         bunny_prompt = {
             "role": "system",
-            "content": constants.BUNNY_PROMPT
+            "content": constants.BUNNY_PROMPT.format(datetime.now().strftime("%Y年%m月%d日 %H:%M:%S"))
         }
         # 把记忆拼进 system prompt
         if len(long_memory) > 0:

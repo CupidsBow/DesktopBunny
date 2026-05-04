@@ -14,7 +14,6 @@ import sqlite3
 import os
 import json
 import threading
-from openai import OpenAI
 
 
 class ModelManager:
@@ -32,13 +31,11 @@ class ModelManager:
             max_token_length: 对话最大上下文长度 (token 数)
         """
         self.platform_detector = platform_detector
+        self.silicon_chat_model = constants.CHAT_MODEL
         self.embedding_model = constants.EMBEDDING_MODEL
+        self.silicon_chat_url = constants.SILICONFLOW_CHAT_URL
         self.ollama_embedding_url = constants.LOCAL_OLLAMA_EMBEDDING_URL
         self.max_token_length = constants.MAX_CHAT_LENGTH
-        self.chat_client = OpenAI(
-            base_url=constants.MODELSCOPE_BASE_URL,
-            api_key=constants.MODELSCOPE_API_KEY, # ModelScope Token
-        )
 
         self.init_memory_db()
 
@@ -100,27 +97,34 @@ class ModelManager:
         try:
             image_b64 = self._capture_and_encode(self.platform_detector)
             
-            response = self.chat_client.chat.completions.create(
-                model=constants.MODELSCOPE_QWEN_MODEL,
-                messages=[{
-                    'role':
-                        'user',
-                    'content': [{
-                        'type': 'text',
-                        'text': self._build_screen_analyze_prompt(bunny),
-                    }, {
-                        'type': 'image_url',
-                        'image_url': {
-                            'url': f"data:image/jpeg;base64,{image_b64}",
-                        },
-                    }],
-                }],
-                stream=False,
-                timeout=300
+            res = requests.post(
+                url=self.silicon_chat_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+                },
+                json={
+                    "model": self.silicon_chat_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{
+                                'type': 'text',
+                                'text': self._build_screen_analyze_prompt(bunny),
+                            }, {
+                                'type': 'image_url',
+                                'image_url': {
+                                    'url': f"data:image/jpeg;base64,{image_b64}",
+                                },
+                            }]
+                        }
+                    ],
+                    "enable_thinking": False
+                }
             )
             
-            if response.choices:
-                reply = response.choices[0].message.content
+            if res.json()["choices"]:
+                reply = res.json()["choices"][0]["message"]["content"]
                 return reply
             else:
                 return None
@@ -164,44 +168,36 @@ class ModelManager:
         优化用户输入，变成适合向量检索的标准query
         作用：去口语、去语气、转陈述句、保留核心事实
         """
-        prompt = f"""请把用户的话转换成一句适合语义检索的客观陈述句，保留核心信息，不要提问，不要情绪，控制在 15-30 字以内，精简无冗余：
-    用户：{user_input}
-    标准检索句："""
+        prompt = f"""将用户的行为提炼为极简客观陈述，用于语义向量检索：
+- 剔除口语、调侃、语气助词
+- 只保留：用户+行为+核心对象
+- 不要疑问、不要修饰、越精简越好
+- 控制在8-20字，纯平铺陈述
+
+用户：{user_input}
+标准检索句："""
 
         try:
-            response = self.chat_client.chat.completions.create(
-                model=constants.MODELSCOPE_QWEN_MODEL,
-                messages=[{
-                    'role':
-                        'user',
-                    'content': [{
-                        'type': 'text',
-                        'text': prompt,
-                    }],
-                }],
-                stream=False,
-                timeout=300
+            print(f"prompt {prompt}")
+            res = requests.post(
+                url=self.silicon_chat_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+                },
+                json={
+                    "model": self.silicon_chat_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "enable_thinking": False
+                }
             )
-            cnt = 5
-            while response.choices == None and cnt > 0:
-                response = self.chat_client.chat.completions.create(
-                    model=constants.MODELSCOPE_QWEN_MODEL,
-                    messages=[{
-                        'role':
-                            'user',
-                        'content': [{
-                            'type': 'text',
-                            'text': prompt,
-                        }],
-                    }],
-                    stream=False,
-                    timeout=300
-                )
-            if response.choices:
-                reply = response.choices[0].message.content
-                return reply
-            else:
-                return user_input
+            print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
+            return res.json()["choices"][0]["message"]["content"]
         except:
             return user_input  # 失败就用原句保底
 
@@ -242,25 +238,22 @@ class ModelManager:
         # 拼接完整提示词
         messages = [bunny_prompt] + self.chat_history
         print(f"messages {messages}")
-        response = self.chat_client.chat.completions.create(
-            model=constants.MODELSCOPE_QWEN_MODEL,
-            messages=messages,
-            stream=False,
-            timeout=300
+        res = requests.post(
+            url=self.silicon_chat_url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+            },
+            json={
+                "model": self.silicon_chat_model,
+                "messages": messages,
+                "enable_thinking": False
+            }
         )
-        cnt = 5
-        while response.choices == None and cnt > 0:
-            cnt -= 1
-            response = self.chat_client.chat.completions.create(
-                model=constants.MODELSCOPE_QWEN_MODEL,
-                messages=messages,
-                stream=False,
-                timeout=300
-            )
-        print(f"response {response}")
+        print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
         reply = ""
-        if response.choices:
-            reply = response.choices[0].message.content
+        if res.json()["choices"]:
+            reply = res.json()["choices"][0]["message"]["content"].strip()
         
         if len(reply) <= 0:
             return None
@@ -278,38 +271,55 @@ class ModelManager:
         self.auto_save_memory_thread = threading.Thread(target=self.auto_save_memory, daemon=True)
         self.auto_save_memory_thread.start()
 
-        if len(self.chat_history) > 20:
-            # 归档 0 到 -20 的所有记录
-            self.archive_chat_range(0, -10)
+        if len(self.chat_history) > 10:
+            # 归档 0 到 -10 的所有记录
+            self.archive_chat_range(0, -5)
             
-            # 只保留最后 20 条
-            self.chat_history = self.chat_history[-10:]
+            # 只保留最后 10 条
+            self.chat_history = self.chat_history[-5:]
 
         self._play_notification_sound()
         return reply
 
     # ---------- 3. 长期记忆（向量化） ----------
     def init_memory_db(self):
-        """初始化 SQLite + FAISS 索引（启动时调用一次）"""
-        # SQLite 存储原始记忆
+        """初始化 SQLite（用户/助手两张表）+ FAISS 索引（两个文件）"""
         self.db_path = os.path.join(constants.DEFAULT_SAVE_DIR, "memory.db")
+
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS memories
+        # 用户记忆表
+        c.execute('''CREATE TABLE IF NOT EXISTS user_memories
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    summary TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        # 助手记忆表
+        c.execute('''CREATE TABLE IF NOT EXISTS assistant_memories
                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
                     summary TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
         conn.close()
 
-        # FAISS 向量索引
-        self.index_path = os.path.join(constants.DEFAULT_SAVE_DIR, "memory.index")
+        # FAISS 索引文件
+        self.user_index_path = os.path.join(constants.DEFAULT_SAVE_DIR, "memory_user.index")
+        self.assistant_index_path = os.path.join(constants.DEFAULT_SAVE_DIR, "memory_assistant.index")
         self.embedding_dim = 1024
-        if os.path.exists(self.index_path):
-            self.index = faiss.read_index(self.index_path)
+
+        # 加载或创建用户索引
+        if os.path.exists(self.user_index_path):
+            self.user_index = faiss.read_index(self.user_index_path)
         else:
             base_index = faiss.IndexFlatL2(self.embedding_dim)
-            self.index = faiss.IndexIDMap(base_index)
+            self.user_index = faiss.IndexIDMap(base_index)
+
+        # 加载或创建助手索引
+        if os.path.exists(self.assistant_index_path):
+            self.assistant_index = faiss.read_index(self.assistant_index_path)
+        else:
+            base_index = faiss.IndexFlatL2(self.embedding_dim)
+            self.assistant_index = faiss.IndexIDMap(base_index)
+
         return True
 
     def get_embedding(self, text: str) -> list:
@@ -324,186 +334,184 @@ class ModelManager:
 
     def summarize_chat(self, chat_history: list) -> list:
         """
-        把对话总结成 多条独立的事实记忆（核心优化！）
-        返回：["事实1", "事实2", "事实3"]
+        总结对话，输出带角色标签的记忆列表
+        返回： [ {"role": "user", "summary": "xxx"}, {"role": "assistant", "summary": "yyy"}, ... ]
         """
         chat_text = "\n".join([
             f"{m['role']}: {m['content']}" for m in chat_history
         ])
 
-        prompt = """请把以下对话内容，提炼成多条独立、简短、客观的事实，
+        prompt = """请把以下对话内容，提炼成多条独立、简短、客观的事实。
+    每条事实必须明确指出是关于“用户”还是“助手”的。
+    格式：每行一条，开头用 [user] 或 [assistant] 标记角色，然后写一句话事实（不超过20字），不要序号。
+
     只提取用户和助手的：习惯、偏好、禁忌、特点。
-    每条一句话，不超过20字，不要情绪，不要废话，不要序号，格式如下：
-        (用户/助手)(习惯/偏好/禁忌/特点)：xxx。
-    不同主题必须分开成多条。
-    只提炼出5条即可，其余内容可以摒弃。
+    不同主题分开成多条，最多输出5条。
 
     对话内容：
     {chat_text}
 
-    请输出每条记忆占一行：
+    请输出（每行一条记忆）：
     """.format(chat_text=chat_text)
 
         try:
-            print(f"prompt {prompt}")
-            response = self.chat_client.chat.completions.create(
-                model=constants.MODELSCOPE_QWEN_MODEL,
-                messages=[{
-                    'role':
-                        'user',
-                    'content': [{
-                        'type': 'text',
-                        'text': prompt,
-                    }],
-                }],
-                stream=False,
-                timeout=300
+            res = requests.post(
+                url=self.silicon_chat_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+                },
+                json={
+                    "model": self.silicon_chat_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "enable_thinking": False
+                }
             )
-            cnt = 5
-            while response.choices == None and cnt > 0:
-                cnt -= 1
-                response = self.chat_client.chat.completions.create(
-                    model=constants.MODELSCOPE_QWEN_MODEL,
-                    messages=[{
-                        'role':
-                            'user',
-                        'content': [{
-                            'type': 'text',
-                            'text': prompt,
-                        }],
-                    }],
-                    stream=False,
-                    timeout=300
-                )
-            print(f"response {response}")
-            response_text = ""
-            if response.choices:
-                response_text = response.choices[0].message.content
+            response_text = res.json()["choices"][0]["message"]["content"]
 
-            # 按行拆分 → 过滤空行 → 清理
+            # 解析成结构化列表
             memory_list = []
             for line in response_text.split("\n"):
                 line = line.strip()
-                if line and len(line) > 4:
-                    memory_list.append(line)
-            
-            return memory_list  # 返回多条记忆！
+                if line.startswith("[user]"):
+                    role = "user"
+                    summary = line[6:].strip()
+                elif line.startswith("[assistant]"):
+                    role = "assistant"
+                    summary = line[11:].strip()
+                else:
+                    continue  # 跳过不符合格式的行
 
+                if len(summary) > 4:
+                    memory_list.append({"role": role, "summary": summary})
+
+            return memory_list
         except Exception as e:
             print(f"总结记忆失败: {e}")
             return []
 
-    def save_memory(self, summary: str) -> int:
-        """保存摘要到 SQLite + 向量到 FAISS（ID 严格对应）"""
-        # 1. 先插入 SQLite，拿到自增 ID
+    def save_memory(self, summary: str, role: str) -> int:
+        """
+        保存一条记忆到对应角色的表和 FAISS 索引
+        role: 'user' 或 'assistant'
+        返回：自增 ID
+        """
+        if role not in ("user", "assistant"):
+            raise ValueError("role 必须是 'user' 或 'assistant'")
+
+        table = f"{role}_memories"
+        index = self.user_index if role == "user" else self.assistant_index
+        index_path = self.user_index_path if role == "user" else self.assistant_index_path
+
+        # 1. 插入 SQLite
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        c.execute("INSERT INTO memories (summary) VALUES (?)", (summary,))
-        memory_id = c.lastrowid  # 拿到自增ID ✅ 关键
+        c.execute(f"INSERT INTO {table} (summary) VALUES (?)", (summary,))
+        memory_id = c.lastrowid
         conn.commit()
         conn.close()
 
-        # 2. 生成向量
+        # 2. 生成向量并存入 FAISS
         emb = self.get_embedding(summary)
         emb_np = np.array([emb], dtype=np.float32)
+        index.add_with_ids(emb_np, np.array([memory_id], dtype=np.int64))
+        faiss.write_index(index, index_path)
 
-        # 3. 存入 FAISS，**强制使用 SQLite 的 id**
-        self.index.add_with_ids(emb_np, np.array([memory_id], dtype=np.int64))
-
-        # 4. 保存索引
-        faiss.write_index(self.index, self.index_path)
-        print(f"保存记忆 {summary.strip()}")
+        print(f"保存 {role} 记忆: {summary.strip()}")
         return memory_id
 
-    def retrieve_memory(self, query: str, top_k=5, distance_threshold=0.6) -> list:
+    def retrieve_memory(self, query: str, top_k=5, role=None) -> list:
         """
-        用当前问题检索最相关的长期记忆（ID完全正确）
-        :param distance_threshold: 距离阈值，越小越严格，越大越宽松
-        推荐默认值：0.6（通用场景）
+        检索最相关的长期记忆，可按角色过滤。
+        role: None 表示两者都检索，'user' 或 'assistant' 单独检索。
+        返回：摘要文本列表（已合并并去重）
         """
-        if self.index.ntotal == 0:
-            return []
+        def search_index(index, conn, table, query_emb, k):
+            """在单个索引上搜索，返回摘要列表"""
+            if index.ntotal == 0:
+                return []
+            distances, ids = index.search(np.array([query_emb], dtype=np.float32), k)
+            memories = []
+            for mem_id, dist in zip(ids[0], distances[0]):
+                if mem_id <= 0:
+                    continue
+                c = conn.cursor()
+                c.execute(f"SELECT summary FROM {table} WHERE id=?", (int(mem_id),))
+                res = c.fetchone()
+                if res:
+                    memories.append(res[0])
+            return memories
 
-        emb = self.get_embedding(query)
-        emb_np = np.array([emb], dtype=np.float32)
-        distances, retrieved_ids = self.index.search(emb_np, top_k)
-
+        query_emb = self.get_embedding(query)
         conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        memories = []
 
-        # 同时遍历 ID 和对应的距离
-        for mem_id, dist in zip(retrieved_ids[0], distances[0]):
-            if mem_id <= 0:
-                continue
-            
-            # ✅ 关键：距离大于阈值 → 跳过（不相关）
-            if dist > distance_threshold:
-                continue
-
-            c.execute("SELECT summary FROM memories WHERE id=?", (int(mem_id),))
-            res = c.fetchone()
-            if res:
-                memories.append(res[0])
+        results = []
+        if role in (None, "user"):
+            results.extend(search_index(self.user_index, conn, "user_memories", query_emb, top_k))
+        if role in (None, "assistant"):
+            results.extend(search_index(self.assistant_index, conn, "assistant_memories", query_emb, top_k))
 
         conn.close()
-        return memories
-    
+        # 去重（相同文本可能被重复保存）
+        return list(dict.fromkeys(results))
+
+    def auto_save_memory(self):
+        """自动总结对话 → 按角色分别保存多条记忆"""
+        if len(self.embedding_chat_history) >= 6:
+            chat_history_to_be_saved = self.embedding_chat_history
+            self.embedding_chat_history = []
+
+            memory_list = self.summarize_chat(chat_history_to_be_saved)
+            for mem in memory_list:
+                if mem["summary"].strip():
+                    self.save_memory(mem["summary"].strip(), mem["role"])
+            print(f"当前用户记忆: {self.list_all_memories(role='user')}")
+            print(f"当前助手记忆: {self.list_all_memories(role='assistant')}")
+            return memory_list
+        return None
+
     def quit_save_memory(self):
-        """退出时保存剩余所有记忆"""
+        """退出时保存剩余记忆"""
         if len(self.embedding_chat_history) > 0:
             memory_list = self.summarize_chat(self.embedding_chat_history)
-            for memory in memory_list:
-                if memory.strip():
-                    self.save_memory(memory.strip())
+            for mem in memory_list:
+                if mem["summary"].strip():
+                    self.save_memory(mem["summary"].strip(), mem["role"])
             self.embedding_chat_history = []
             return memory_list
         return None
 
-    def auto_save_memory(self):
-        """自动总结对话 → 生成多条记忆 → 批量保存（优化版）"""
-        if len(self.embedding_chat_history) >= 6:
-            # 清空待总结历史
-            chat_history_to_be_saved = self.embedding_chat_history
-            self.embedding_chat_history = []
-            
-            # 现在返回 多条记忆
-            memory_list = self.summarize_chat(chat_history_to_be_saved)
-            
-            # 循环保存每条记忆
-            for memory in memory_list:
-                if memory.strip():
-                    self.save_memory(memory.strip())
-            print(f"当前记忆 {self.list_all_memories()}")
-            return memory_list
-        return None
-    
-    def list_all_memories(self) -> List[dict]:
+    def list_all_memories(self, role=None) -> dict:
         """
-        列出 SQLite 中所有长期记忆
-        返回：[ {id:1, summary:"xxx", created_at:"2025-..."}, ... ]
+        列出长期记忆，可按角色过滤。
+        返回：{"user": [...], "assistant": [...]} 或单个角色的列表
         """
         try:
             conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row  # 让结果可以按字段名读取
-            c = conn.cursor()
-            
-            # 按时间倒序，最新的在最前面
-            c.execute("SELECT id, summary, created_at FROM memories ORDER BY created_at DESC")
-            rows = c.fetchall()
-            
-            # 转成友好的字典格式
-            memory_list = []
-            for row in rows:
-                memory_list.append({
-                    "id": row["id"],
-                    "summary": row["summary"],
-                    "created_at": row["created_at"]
-                })
-            
-            conn.close()
-            return memory_list
+            conn.row_factory = sqlite3.Row
 
+            def fetch_memories(table):
+                c = conn.cursor()
+                c.execute(f"SELECT id, summary, created_at FROM {table} ORDER BY created_at DESC")
+                rows = c.fetchall()
+                return [{"id": row["id"], "summary": row["summary"], "created_at": row["created_at"]} for row in rows]
+
+            if role == "user":
+                result = fetch_memories("user_memories")
+            elif role == "assistant":
+                result = fetch_memories("assistant_memories")
+            else:
+                result = {
+                    "user": fetch_memories("user_memories"),
+                    "assistant": fetch_memories("assistant_memories")
+                }
+            conn.close()
+            return result
         except Exception as e:
             print(f"读取记忆失败: {e}")
-            return []
+            return {} if role is None else []

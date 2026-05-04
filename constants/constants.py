@@ -19,14 +19,14 @@ SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS = 120
 SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS = 180
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
 SCREEN_ANALYZE_MODEL = "qwen3-vl:4b"
-CHAT_MODEL = "qwen3-vl:8b"
+CHAT_MODEL = "Qwen/Qwen3.5-397B-A17B"
 EMBEDDING_MODEL = "bge-m3"
 MODELSCOPE_QWEN_MODEL = "Qwen/Qwen3.5-397B-A17B"
 LOCAL_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 LOCAL_OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 LOCAL_OLLAMA_EMBEDDING_URL = "http://localhost:11434/api/embed"
-MODELSCOPE_BASE_URL = "https://api-inference.modelscope.cn/v1"
-MODELSCOPE_API_KEY="ms-0b7d2bc8-88ba-47e5-9642-df2f985ba3b8"
+SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+SILICONFLOW_API_KEY="{your_api_key}"
 MAX_CHAT_LENGTH = 2048
 BUNNY_PROMPT = """你是在桌面上的兔娘Alice，今天是{}，用日常轻松口语和我聊天。
 规则：

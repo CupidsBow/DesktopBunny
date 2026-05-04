@@ -177,8 +177,6 @@ class World:
 
     def _on_tray_open_chat_window(self):
         """托盘菜单：打开聊天窗口（如果已打开则激活）"""
-        self.detect_platforms_enabled = False
-        self.screen_analyze_enabled = False
         if self.chat_root and self.chat_root.winfo_exists():
             # 窗口已存在：恢复显示并置顶
             self.chat_root.deiconify()
@@ -208,8 +206,6 @@ class World:
     def _hide_chat_window(self, root):
         """隐藏聊天窗口（不销毁，保证线程安全）"""
         root.withdraw()
-        self.detect_platforms_enabled = True
-        self.screen_analyze_enabled = True
 
     def _on_tray_exit(self):
         self.running = False

@@ -14,6 +14,7 @@ import sqlite3
 import os
 import json
 import threading
+from openai import OpenAI
 
 
 class ModelManager:
@@ -31,13 +32,13 @@ class ModelManager:
             max_token_length: 对话最大上下文长度 (token 数)
         """
         self.platform_detector = platform_detector
-        self.screen_analyze_model = constants.SCREEN_ANALYZE_MODEL
-        self.chat_model = constants.CHAT_MODEL
         self.embedding_model = constants.EMBEDDING_MODEL
-        self.ollama_generate_url = constants.LOCAL_OLLAMA_GENERATE_URL
-        self.ollama_chat_url = constants.LOCAL_OLLAMA_CHAT_URL
         self.ollama_embedding_url = constants.LOCAL_OLLAMA_EMBEDDING_URL
         self.max_token_length = constants.MAX_CHAT_LENGTH
+        self.chat_client = OpenAI(
+            base_url=constants.MODELSCOPE_BASE_URL,
+            api_key=constants.MODELSCOPE_API_KEY, # ModelScope Token
+        )
 
         self.init_memory_db()
 
@@ -75,7 +76,7 @@ class ModelManager:
         else:
             bunny_feeling += "，并且你吃得饱饱的"
 
-        return f"""你是图片里的兔兔{bunny.name}。现在是{bunny_feeling}。
+        return f"""你是图片里的兔娘{bunny.name}。现在是{bunny_feeling}。
 结合这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
 要求：
 - 语气可爱
@@ -98,38 +99,37 @@ class ModelManager:
         """分析屏幕，返回吐槽文案"""
         try:
             image_b64 = self._capture_and_encode(self.platform_detector)
-
-            payload = {
-                "model": self.screen_analyze_model,
-                "prompt": self._build_screen_analyze_prompt(bunny),
-                "images": [image_b64],
-                "stream": False,
-                "options": {
-                    "temperature": 0.8,
-                },
-            }
-
-            response = requests.post(self.ollama_generate_url, json=payload, timeout=60)
-            result = response.json()["response"].strip()
-
-            # 清理可能的前缀
-            for prefix in ["吐槽：", "评论：", "兔兔：", "兔兔说：", "回复："]:
-                if result.startswith(prefix):
-                    result = result[len(prefix):].strip()
-
-            return result
+            
+            response = self.chat_client.chat.completions.create(
+                model=constants.MODELSCOPE_QWEN_MODEL,
+                messages=[{
+                    'role':
+                        'user',
+                    'content': [{
+                        'type': 'text',
+                        'text': self._build_screen_analyze_prompt(bunny),
+                    }, {
+                        'type': 'image_url',
+                        'image_url': {
+                            'url': f"data:image/jpeg;base64,{image_b64}",
+                        },
+                    }],
+                }],
+                stream=False,
+                timeout=300
+            )
+            
+            if response.choices:
+                reply = response.choices[0].message.content
+                return reply
+            else:
+                return None
 
         except Exception as e:
             print(f"分析失败: {e}")
             return None
 
     # ---------- 2. 对话聊天 ----------
-    def _estimate_tokens(self, text: str) -> int:
-        """粗略估算 token 数（中文一个字约 1.5 token，英文约 0.75 token/字母）"""
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-        others = len(text) - chinese_chars
-        return int(chinese_chars * 1.5 + others * 0.4)
-
     def _play_notification_sound(self):
         try:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
@@ -169,17 +169,39 @@ class ModelManager:
     标准检索句："""
 
         try:
-            resp = requests.post(
-                self.ollama_generate_url,
-                json={
-                    "model": self.screen_analyze_model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.1}
-                },
-                timeout=60
+            response = self.chat_client.chat.completions.create(
+                model=constants.MODELSCOPE_QWEN_MODEL,
+                messages=[{
+                    'role':
+                        'user',
+                    'content': [{
+                        'type': 'text',
+                        'text': prompt,
+                    }],
+                }],
+                stream=False,
+                timeout=300
             )
-            return resp.json()["response"].strip()
+            cnt = 5
+            while response.choices == None and cnt > 0:
+                response = self.chat_client.chat.completions.create(
+                    model=constants.MODELSCOPE_QWEN_MODEL,
+                    messages=[{
+                        'role':
+                            'user',
+                        'content': [{
+                            'type': 'text',
+                            'text': prompt,
+                        }],
+                    }],
+                    stream=False,
+                    timeout=300
+                )
+            if response.choices:
+                reply = response.choices[0].message.content
+                return reply
+            else:
+                return user_input
         except:
             return user_input  # 失败就用原句保底
 
@@ -216,28 +238,33 @@ class ModelManager:
         # 把记忆拼进 system prompt
         if len(long_memory) > 0:
             bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
-        total_tokens = self._estimate_tokens(bunny_prompt)
-        selected_history = []
-
-        for msg in reversed(self.chat_history):
-            token_length = self._estimate_tokens(msg)
-            if total_tokens + token_length <= self.max_token_length:
-                total_tokens += token_length
-                selected_history.insert(0, msg)
-            else:
-                break
 
         # 拼接完整提示词
-        message = [bunny_prompt] + selected_history
-        print(f"message {message}")
-        payload = {
-            "model": self.chat_model,
-            "messages": message,
-            "stream": False
-        }
-        resp = requests.post(self.ollama_chat_url, json=payload, timeout=120)
-        resp.raise_for_status()
-        reply = resp.json()["message"]["content"]
+        messages = [bunny_prompt] + self.chat_history
+        print(f"messages {messages}")
+        response = self.chat_client.chat.completions.create(
+            model=constants.MODELSCOPE_QWEN_MODEL,
+            messages=messages,
+            stream=False,
+            timeout=300
+        )
+        cnt = 5
+        while response.choices == None and cnt > 0:
+            cnt -= 1
+            response = self.chat_client.chat.completions.create(
+                model=constants.MODELSCOPE_QWEN_MODEL,
+                messages=messages,
+                stream=False,
+                timeout=300
+            )
+        print(f"response {response}")
+        reply = ""
+        if response.choices:
+            reply = response.choices[0].message.content
+        
+        if len(reply) <= 0:
+            return None
+
         self.chat_history.append({
             "role": "assistant",
             "content": reply
@@ -251,12 +278,12 @@ class ModelManager:
         self.auto_save_memory_thread = threading.Thread(target=self.auto_save_memory, daemon=True)
         self.auto_save_memory_thread.start()
 
-        if len(self.chat_history) > 10:
-            # 归档 0 到 -10 的所有记录
-            self.archive_chat_range(0, -5)
+        if len(self.chat_history) > 20:
+            # 归档 0 到 -20 的所有记录
+            self.archive_chat_range(0, -10)
             
-            # 只保留最后 10 条
-            self.chat_history = self.chat_history[-5:]
+            # 只保留最后 20 条
+            self.chat_history = self.chat_history[-10:]
 
         self._play_notification_sound()
         return reply
@@ -318,14 +345,40 @@ class ModelManager:
     """.format(chat_text=chat_text)
 
         try:
-            payload = {
-                "model": self.screen_analyze_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.1}  # 事实必须低温度
-            }
-            resp = requests.post(self.ollama_generate_url, json=payload, timeout=120)
-            response_text = resp.json()["response"].strip()
+            print(f"prompt {prompt}")
+            response = self.chat_client.chat.completions.create(
+                model=constants.MODELSCOPE_QWEN_MODEL,
+                messages=[{
+                    'role':
+                        'user',
+                    'content': [{
+                        'type': 'text',
+                        'text': prompt,
+                    }],
+                }],
+                stream=False,
+                timeout=300
+            )
+            cnt = 5
+            while response.choices == None and cnt > 0:
+                cnt -= 1
+                response = self.chat_client.chat.completions.create(
+                    model=constants.MODELSCOPE_QWEN_MODEL,
+                    messages=[{
+                        'role':
+                            'user',
+                        'content': [{
+                            'type': 'text',
+                            'text': prompt,
+                        }],
+                    }],
+                    stream=False,
+                    timeout=300
+                )
+            print(f"response {response}")
+            response_text = ""
+            if response.choices:
+                response_text = response.choices[0].message.content
 
             # 按行拆分 → 过滤空行 → 清理
             memory_list = []

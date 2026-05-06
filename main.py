@@ -145,7 +145,7 @@ class World:
         control_items = [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
-                "打开聊天（需要 Ollama）",               # 虽然不可见，但最好保留文字便于调试
+                "打开聊天",               # 虽然不可见，但最好保留文字便于调试
                 self._on_tray_open_chat_window,
                 default=True,             # 设为默认，左键单击时触发
                 visible=False            # 在右键菜单中不可见
@@ -156,11 +156,11 @@ class World:
                 checked=lambda item: self.detect_platforms_enabled
             ),
             pystray.MenuItem(
-                "读屏幕（需要 Ollama）",
+                "读屏幕",
                 self._on_tray_toggle_screen_analysis,
                 checked=lambda item: self.screen_analyze_enabled
             ),
-            pystray.MenuItem("交互（需要 Ollama）", self._on_tray_open_chat_window),
+            pystray.MenuItem("交互", self._on_tray_open_chat_window),
             pystray.MenuItem("退出", self._on_tray_exit)
         ]
 

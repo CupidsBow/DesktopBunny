@@ -22,13 +22,7 @@ class ModelManager:
     def __init__(self, platform_detector):
         """
         Args:
-            detector: PlatformDetector 实例，用于截取屏幕
-            screen_analyze_model: 屏幕分析模型
-            chat_model: 对话模型
-            embedding_model: 向量化模型
-            ollama_generate_url: Ollama generate API 地址
-            ollama_chat_url: Ollama chat API 地址
-            max_token_length: 对话最大上下文长度 (token 数)
+            platform_detector: PlatformDetector 实例，用于截取屏幕
         """
         self.platform_detector = platform_detector
         self.silicon_chat_model = constants.CHAT_MODEL

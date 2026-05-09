@@ -67,7 +67,7 @@ class ModelManager:
         else:
             bunny_feeling += "，并且你吃得饱饱的"
 
-        return f"""你是图片里的兔娘{bunny.name}。现在是{bunny_feeling}。
+        return f"""你是图片里的兔兔{bunny.name}。现在是{bunny_feeling}。
 结合这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
 要求：
 - 语气可爱

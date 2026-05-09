@@ -150,6 +150,8 @@ class World:
                 default=True,             # 设为默认，左键单击时触发
                 visible=False            # 在右键菜单中不可见
             ),
+            pystray.MenuItem("添加一只兔兔", self._add_bunny),
+            pystray.MenuItem("移除一只兔兔", self._delete_bunny),
             pystray.MenuItem(
                 "平台检测",
                 self._on_tray_toggle_platform_detection,
@@ -165,6 +167,22 @@ class World:
         ]
 
         return pystray.Menu(*(bunny_items + control_items))
+
+    def _generate_bunny_name(self):
+        index = random.randint(0, len(constants.BUNNY_NAME_LIST) - 1)
+        return constants.BUNNY_NAME_LIST[index]
+
+    def _add_bunny(self):
+        if len(self.bunnies) >= 5:
+            return
+        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), self._generate_bunny_name()))
+        self._refresh_tray_menu()
+    
+    def _delete_bunny(self):
+        if len(self.bunnies) <= 1:
+            return
+        self.bunnies.pop()
+        self._refresh_tray_menu()
 
     def _on_tray_toggle_platform_detection(self, *args):
         self.detect_platforms_enabled = not self.detect_platforms_enabled

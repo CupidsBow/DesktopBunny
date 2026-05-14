@@ -11,11 +11,14 @@ from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
-from tools.model_manager import ModelManager
+from manager.model_manager import ModelManager
+from tools.screen_analyzer import ScreenAnalyzer
 import random
 import functools
-from tools.save_manager import SaveManager
+from manager.save_manager import SaveManager
 import tkinter as tk
+from tools.tool_executor import ToolExecutor
+from tools.get_local_time import get_local_time
 
 
 class World:
@@ -40,8 +43,9 @@ class World:
         self.screen_analyze_enabled = False
 
         self.detector = PlatformDetector()
+        self.screen_analyzer = ScreenAnalyzer(self.detector)
         self.save_manager = SaveManager()
-        self.model_manager = ModelManager(self.detector)
+        self.model_manager = ModelManager()
         self.chat_root = None
         self.chat_window_thread = None
 
@@ -91,6 +95,20 @@ class World:
         self.refresh_tray_menu_thread.start()
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
         self.auto_save_thread.start()
+
+        self.register_tools()
+
+    def register_tools(self):
+        if self.tool_executor == None:
+            self.tool_executor = ToolExecutor()
+        
+        self.tool_executor.registerTool(
+            "get_local_time",
+            "一个获取当前时间的工具，返回格式为 %Y-%m-%d %H:%M:%S",
+            get_local_time
+        )
+
+        print(self.tool_executor.getAvailableTools())
     
     def _start_tray(self):
         def _run_tray():
@@ -353,7 +371,7 @@ class World:
             try:
                 if self.screen_analyze_enabled:
                     comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
-                    comment = self.model_manager.analyze_screen(comment_bunny)
+                    comment = self.screen_analyzer.analyze_screen(comment_bunny)
                     if comment:
                         comment_bunny.set_comment(comment)
             except Exception as e:

@@ -19,17 +19,11 @@ import threading
 class ModelManager:
     """Ollama 模型管理器，负责截图分析、对话、长期记忆"""
 
-    def __init__(self, platform_detector):
-        """
-        Args:
-            platform_detector: PlatformDetector 实例，用于截取屏幕
-        """
-        self.platform_detector = platform_detector
+    def __init__(self):
         self.silicon_chat_model = constants.CHAT_MODEL
         self.embedding_model = constants.EMBEDDING_MODEL
         self.silicon_chat_url = constants.SILICONFLOW_CHAT_URL
         self.ollama_embedding_url = constants.LOCAL_OLLAMA_EMBEDDING_URL
-        self.max_token_length = constants.MAX_CHAT_LENGTH
 
         self.init_memory_db()
 
@@ -38,96 +32,7 @@ class ModelManager:
         self.embedding_chat_history = []
         print(f"当前记忆 {self.list_all_memories()}")
 
-    # ---------- 1. 屏幕分析 ----------
-    def _build_screen_analyze_prompt(self, bunny=None) -> str:
-        """根据当前北京时间构建带时间感知的提示词"""
-        beijing_hour = datetime.now(timezone(timedelta(hours=8))).hour
-        
-        if beijing_hour < 6:
-            bunny_feeling = "深夜"
-        elif beijing_hour < 9:
-            bunny_feeling = "早上"
-        elif beijing_hour < 12:
-            bunny_feeling = "上午"
-        elif beijing_hour < 14:
-            bunny_feeling = "午后"
-        elif beijing_hour < 18:
-            bunny_feeling = "下午"
-        elif beijing_hour < 20:
-            bunny_feeling = "傍晚"
-        elif beijing_hour < 23:
-            bunny_feeling = "晚上"
-        else:
-            bunny_feeling = "深夜"
-        
-        if bunny.satiety < 20:
-            bunny_feeling += "，并且你肚子特别饿了"
-        elif bunny.satiety < 50:
-            bunny_feeling += "，并且你有点饿了"
-        else:
-            bunny_feeling += "，并且你吃得饱饱的"
-
-        return f"""你是图片里的兔兔{bunny.name}。现在是{bunny_feeling}。
-结合这张屏幕截图，用一句简短幽默的话吐槽，或者对屏幕里的关键点发出疑问。
-要求：
-- 语气可爱
-- 30字以内
-- 不要描述画面，直接说评论
-- 直接输出评论文案，不要加任何前缀"""
-
-    def _capture_and_encode(self, detector):
-        """截图并转为 base64"""
-        img = detector.capture_screen()
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(img_rgb)
-        pil_img.thumbnail((640, 640))
-
-        buffer = io.BytesIO()
-        pil_img.save(buffer, format="JPEG", quality=40)
-        return base64.b64encode(buffer.getvalue()).decode()
-
-    def analyze_screen(self, bunny) -> str:
-        """分析屏幕，返回吐槽文案"""
-        try:
-            image_b64 = self._capture_and_encode(self.platform_detector)
-            
-            res = requests.post(
-                url=self.silicon_chat_url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
-                },
-                json={
-                    "model": self.silicon_chat_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [{
-                                'type': 'text',
-                                'text': self._build_screen_analyze_prompt(bunny),
-                            }, {
-                                'type': 'image_url',
-                                'image_url': {
-                                    'url': f"data:image/jpeg;base64,{image_b64}",
-                                },
-                            }]
-                        }
-                    ],
-                    "enable_thinking": False
-                }
-            )
-            
-            if res.json()["choices"]:
-                reply = res.json()["choices"][0]["message"]["content"]
-                return reply
-            else:
-                return None
-
-        except Exception as e:
-            print(f"分析失败: {e}")
-            return None
-
-    # ---------- 2. 对话聊天 ----------
+    # ---------- 1. 对话聊天 ----------
     def _play_notification_sound(self):
         try:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
@@ -275,7 +180,7 @@ class ModelManager:
         self._play_notification_sound()
         return reply
 
-    # ---------- 3. 长期记忆（向量化） ----------
+    # ---------- 2. 长期记忆（向量化） ----------
     def init_memory_db(self):
         """初始化 SQLite（用户/助手两张表）+ FAISS 索引（两个文件）"""
         self.db_path = os.path.join(constants.DEFAULT_SAVE_DIR, "memory.db")
@@ -509,3 +414,54 @@ class ModelManager:
         except Exception as e:
             print(f"读取记忆失败: {e}")
             return {} if role is None else []
+    
+    # ---------- 3. 模型交互部分 重构 ----------
+    def send_request_to_chat_model(self, user_input: str, chat_history: List) -> str:
+        """
+        与聊天模型对话，给出历史对话文件
+        Returns: 模型回复
+        """
+        # --------------------- 【记忆检索：核心】 ---------------------
+        retrieval_query = self._prepare_retrieval_query(user_input)
+        # 再用标准query去搜记忆
+        relevant_memories = self.retrieve_memory(retrieval_query)
+        long_memory = ""
+        if len(relevant_memories) > 0:
+            long_memory = "\n".join([
+                f"• {m}" for m in relevant_memories
+            ])
+        # ------------------------------------------------------------
+
+        # 构建上下文：倒序加入历史，直到接近长度限制
+        bunny_prompt = {
+            "role": "system",
+            "content": constants.BUNNY_PROMPT.format(datetime.now().strftime("%Y年%m月%d日 %H:%M:%S"))
+        }
+        # 把记忆拼进 system prompt
+        if len(long_memory) > 0:
+            bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
+
+        # 拼接完整提示词
+        messages = [bunny_prompt] + chat_history
+        print(f"messages {messages}")
+        res = requests.post(
+            url=self.silicon_chat_url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+            },
+            json={
+                "model": self.silicon_chat_model,
+                "messages": messages,
+                "enable_thinking": False
+            }
+        )
+        print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
+        reply = ""
+        if res.json()["choices"]:
+            reply = res.json()["choices"][0]["message"]["content"].strip()
+        
+        if len(reply) <= 0:
+            return None
+
+        return reply

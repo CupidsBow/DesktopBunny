@@ -39,7 +39,7 @@ class ChatWindow:
 
         # 确保 ModelManager 存在
         if not hasattr(self.world, 'model_manager'):
-            from tools.model_manager import ModelManager
+            from manager.model_manager import ModelManager
             self.world.model_manager = ModelManager(detector=self.world.detector)
         self.model_manager = self.world.model_manager
 
@@ -140,7 +140,8 @@ class ChatWindow:
                 bg=self.NORMAL_BG,
                 fg=self.NORMAL_FG,
                 activebackground=self.PRESS_BG,
-                activeforeground=self.PRESS_FG
+                activeforeground=self.PRESS_FG,
+                text="发送"
             )
         else:
             self.send_btn.config(
@@ -148,7 +149,8 @@ class ChatWindow:
                 bg=self.DISABLE_BG,
                 fg=self.DISABLE_FG,
                 activebackground=self.DISABLE_BG,
-                activeforeground=self.DISABLE_FG
+                activeforeground=self.DISABLE_FG,
+                text="兔兔思考中..."
             )
 
     # ====================== 原有功能不变 ======================

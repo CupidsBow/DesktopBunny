@@ -96,6 +96,7 @@ class World:
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
         self.auto_save_thread.start()
 
+        self.tool_executor = ToolExecutor()
         self.register_tools()
 
     def register_tools(self):

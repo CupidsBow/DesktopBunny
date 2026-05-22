@@ -5,6 +5,7 @@ import requests
 from PIL import Image
 from constants import constants
 from datetime import datetime, timezone, timedelta
+import logging
 
 
 class ScreenAnalyzer:
@@ -16,6 +17,7 @@ class ScreenAnalyzer:
         self.platform_detector = platform_detector
         self.silicon_chat_model = constants.CHAT_MODEL
         self.silicon_chat_url = constants.SILICONFLOW_CHAT_URL
+        self.logger = logging.getLogger(__name__)
 
     def _build_screen_analyze_prompt(self, bunny=None) -> str:
         """根据当前北京时间构建带时间感知的提示词"""
@@ -101,5 +103,5 @@ class ScreenAnalyzer:
                 return None
 
         except Exception as e:
-            print(f"分析失败: {e}")
+            self.logger.error(f"屏幕内容分析失败: {e}")
             return None

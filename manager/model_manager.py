@@ -1,22 +1,15 @@
-import base64
-import io
 import numpy as np
-import cv2
 import requests
-from PIL import Image
-from typing import List, Tuple
 from constants import constants
-from datetime import datetime, timezone, timedelta
 import winsound
-import ctypes
 import faiss
 import sqlite3
 import os
 import json
 import threading
 from tools.tool_executor import ToolExecutor
-from constants import constants
 import re
+import logging
 
 
 class ModelManager:
@@ -32,20 +25,21 @@ class ModelManager:
             self,
             self.tool_executor
         )
+        self.logger = logging.getLogger(__name__)
 
         self.init_memory_db()
 
         # 对话历史（只存文本，token 长度近似计算）
         self.chat_history = []
         self.embedding_chat_history = []
-        print(f"当前记忆 {self.list_all_memories()}")
+        self.logger.info(f"当前记忆: {self.list_all_memories()}")
 
     # ---------- 1. 对话聊天 ----------
     def _play_notification_sound(self):
         try:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"播放通知声音失败: {e}")
 
     def archive_chat_range(self, begin_index: int, end_index: int):
         """
@@ -66,48 +60,9 @@ class ModelManager:
         os.makedirs(constants.DEFAULT_SAVE_DIR, exist_ok=True)
         
         # 追加写入文件（JSON 每行一条）
-        import json
         with open(archive_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(archive_history, ensure_ascii=False) + "\n")
     
-    def _prepare_retrieval_query(self, user_input: str) -> str:
-        """
-        优化用户输入，变成适合向量检索的标准query
-        作用：去口语、去语气、转陈述句、保留核心事实
-        """
-        prompt = f"""将用户的行为提炼为极简客观陈述，用于语义向量检索：
-- 剔除口语、调侃、语气助词
-- 只保留：用户+行为+核心对象
-- 不要疑问、不要修饰、越精简越好
-- 控制在8-20字，纯平铺陈述
-
-用户：{user_input}
-标准检索句："""
-
-        try:
-            print(f"prompt {prompt}")
-            res = requests.post(
-                url=self.silicon_chat_url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
-                },
-                json={
-                    "model": self.silicon_chat_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "enable_thinking": False
-                }
-            )
-            print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
-            return res.json()["choices"][0]["message"]["content"]
-        except:
-            return user_input  # 失败就用原句保底
-
     def chat(self, user_input: str) -> str:
         """
         与聊天模型对话，自动管理上下文长度。
@@ -126,25 +81,11 @@ class ModelManager:
         if not fact_answer:
             fact_answer = "兔脑过载..."
 
-        # --------------------- 【记忆检索：核心】 ---------------------
-        # retrieval_query = self._prepare_retrieval_query(user_input)
-        # # 再用标准query去搜记忆
-        # relevant_memories = self.retrieve_memory(retrieval_query)
-        # long_memory = ""
-        # if len(relevant_memories) > 0:
-        #     long_memory = "\n".join([
-        #         f"• {m}" for m in relevant_memories
-        #     ])
-        # ------------------------------------------------------------
-
         # 构建上下文：倒序加入历史，直到接近长度限制
         bunny_prompt = {
             "role": "system",
             "content": constants.BUNNY_PROMPT
         }
-        # 把记忆拼进 system prompt 检索记忆移到 agent 工具中
-        # if len(long_memory) > 0:
-        #     bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
 
         # ====================== 【最小改动：插入 fact_answer】 ======================
         messages = [bunny_prompt] + self.chat_history + [
@@ -152,7 +93,7 @@ class ModelManager:
         ]
         # ==========================================================================
 
-        print(f"messages {messages}")
+        self.logger.info(f"请求 chat model 对话: {messages}")
         res = requests.post(
             url=self.silicon_chat_url,
             headers={
@@ -165,7 +106,7 @@ class ModelManager:
                 "enable_thinking": False
             }
         )
-        print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
+        self.logger.info(f"chat model 返回: {res.json()["choices"][0]["message"]["content"]}")
         reply = ""
         if res.json()["choices"]:
             reply = res.json()["choices"][0]["message"]["content"].strip()
@@ -261,7 +202,7 @@ class ModelManager:
     格式：每行一条，开头用 [user] 或 [assistant] 标记角色，然后写一句话事实（不超过20字），不要序号。
 
     只提取用户和助手的：习惯、偏好、禁忌、特点。
-    不同主题分开成多条，最多输出5条。
+    不同主题分开成多条，最多输出5条，若没有提取到则不输出。
 
     对话内容：
     {chat_text}
@@ -307,7 +248,7 @@ class ModelManager:
 
             return memory_list
         except Exception as e:
-            print(f"总结记忆失败: {e}")
+            self.logger.error(f"总结记忆失败: {e}")
             return []
 
     def save_memory(self, summary: str, role: str) -> int:
@@ -337,7 +278,7 @@ class ModelManager:
         index.add_with_ids(emb_np, np.array([memory_id], dtype=np.int64))
         faiss.write_index(index, index_path)
 
-        print(f"保存 {role} 记忆: {summary.strip()}")
+        self.logger.info(f"保存 {role} 记忆: {summary.strip()}")
         return memory_id
 
     def retrieve_memory(self, query: str, top_k=5, role=None) -> list:
@@ -385,8 +326,8 @@ class ModelManager:
             for mem in memory_list:
                 if mem["summary"].strip():
                     self.save_memory(mem["summary"].strip(), mem["role"])
-            print(f"当前用户记忆: {self.list_all_memories(role='user')}")
-            print(f"当前助手记忆: {self.list_all_memories(role='assistant')}")
+            self.logger.info(f"当前 user 记忆: {self.list_all_memories(role='user')}")
+            self.logger.info(f"当前 assistant 记忆: {self.list_all_memories(role='assistant')}")
             return memory_list
         return None
 
@@ -428,7 +369,7 @@ class ModelManager:
             conn.close()
             return result
         except Exception as e:
-            print(f"读取记忆失败: {e}")
+            self.logger.error(f"读取记忆失败: {e}")
             return {} if role is None else []
     
     # ---------- 3. 模型交互部分 重构 ----------
@@ -442,7 +383,7 @@ class ModelManager:
             "role": "user",
             "content": user_input
         }]
-        print(f"messages {messages}")
+        self.logger.info(f"请求 chat model 对话: {messages}")
         res = requests.post(
             url=self.silicon_chat_url,
             headers={
@@ -455,7 +396,7 @@ class ModelManager:
                 "enable_thinking": False
             }
         )
-        print(f"res.json() {res.json()["choices"][0]["message"]["content"]}")
+        self.logger.info(f"chat model 返回: {res.json()["choices"][0]["message"]["content"]}")
         reply = ""
         if res.json()["choices"]:
             reply = res.json()["choices"][0]["message"]["content"].strip()
@@ -472,6 +413,7 @@ class ReActAgent:
         self.tool_executor = tool_executor
         self.max_steps = max_steps
         self.history = []
+        self.logger = logging.getLogger(__name__)
 
     def run(self, question: str):
         """
@@ -482,7 +424,7 @@ class ReActAgent:
 
         while current_step < self.max_steps:
             current_step += 1
-            print(f"--- 第 {current_step} 步 ---")
+            self.logger.info(f"--- 第 {current_step} 步 ---")
 
             # 1. 格式化提示词
             tools_desc = self.tool_executor.getAvailableTools()
@@ -497,7 +439,7 @@ class ReActAgent:
             response_text = self.model_manager.send_request_to_chat_model(prompt)
             
             if not response_text:
-                print("错误:LLM未能返回有效响应。")
+                self.logger.error("chat model 未能返回有效响应")
                 break
 
             # (这段逻辑在 run 方法的 while 循环内)
@@ -505,17 +447,17 @@ class ReActAgent:
             thought, action = self._parse_output(response_text)
             
             if thought:
-                print(f"思考: {thought}")
+                self.logger.info(f"思考: {thought}")
 
             if not action:
-                print("警告:未能解析出有效的Action，流程终止。")
+                self.logger.warning("未能解析出有效的 Action, 流程终止")
                 break
 
             # 4. 执行Action
             if action.startswith("Finish"):
                 # 如果是Finish指令，提取最终答案并结束
                 final_answer = re.match(r"Finish\[(.*)\]", action, re.DOTALL).group(1)
-                print(f"最终答案: {final_answer}")
+                self.logger.info(f"最终答案: {final_answer}")
                 return final_answer
             
             tool_name, tool_input = self._parse_action(action)
@@ -523,22 +465,22 @@ class ReActAgent:
                 # ... 处理无效Action格式 ...
                 continue
 
-            print(f"行动: {tool_name}[{tool_input}]")
+            self.logger.info(f"行动: {tool_name}[{tool_input}]")
             
             tool_function = self.tool_executor.getTool(tool_name)
             if not tool_function:
-                observation = f"错误:未找到名为 '{tool_name}' 的工具。"
+                observation = f"错误: 未找到名为 '{tool_name}' 的工具"
             else:
                 observation = tool_function(tool_input) # 调用真实工具
             # (这段逻辑紧随工具调用之后，在 while 循环的末尾)
-            print(f"观察: {observation}")
+            self.logger.info(f"观察: {observation}")
             
             # 将本轮的Action和Observation添加到历史记录中
             self.history.append(f"Action: {action}")
             self.history.append(f"Observation: {observation}")
 
         # 循环结束
-        print("已达到最大步数，流程终止。")
+        self.logger.info("已达到最大步数，流程终止")
         return None
 
     # (这些方法是 ReActAgent 类的一部分)

@@ -4,7 +4,9 @@ import tkinter as tk
 from constants import constants
 import ctypes
 from PIL import Image, ImageTk
-import sys, os
+import sys
+import os
+import logging
 
 
 class ChatWindow:
@@ -12,6 +14,7 @@ class ChatWindow:
         self.master = master
         self.world = world
         self.is_waiting_reply = False
+        self.logger = logging.getLogger(__name__)
 
         # ========== 新增：让任务栏图标生效（Windows 专属） ==========
         myappid = "mycompany.myproduct.bunny"  # 随便写个唯一字符串
@@ -35,7 +38,7 @@ class ChatWindow:
             master.iconphoto(True, icon)  # True = 同时影响任务栏
             self.master.icon = icon  # 防止被垃圾回收
         except Exception as e:
-            print("图标加载失败：", e)
+            self.logger.error(f"图标加载失败: {e}")
 
         # 确保 ModelManager 存在
         if not hasattr(self.world, 'model_manager'):

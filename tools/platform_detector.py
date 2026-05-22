@@ -5,6 +5,7 @@ import numpy as np
 import mss
 from typing import List
 import pygame.math
+import logging
 
 
 class PlatformDetector:
@@ -15,6 +16,7 @@ class PlatformDetector:
         self.h_dilate_width = h_dilate_width
         self.min_line_height = min_line_height
         self.sct = mss.mss()
+        self.logger = logging.getLogger(__name__)
         
     def capture_screen(self, monitor_index=1) -> np.ndarray:
         monitor = self.sct.monitors[monitor_index]

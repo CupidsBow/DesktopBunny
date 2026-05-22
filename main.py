@@ -21,12 +21,16 @@ from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
 from tools.switch_light import turn_on_the_light, turn_off_the_light
 import sympy
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 
 class World:
     def __init__(self, fps=constants.GLOBAL_FPS):
         self.TRANSPARENT_COLOR = (255, 0, 255)
         self.ICON_PATH = constants.BUNNY_ICON
+
+        self.logger = logging.getLogger(__name__)
 
         self.fps = fps
         
@@ -101,7 +105,7 @@ class World:
         self.auto_save_thread.start()
 
     def register_tools(self):
-        if self.tool_executor == None:
+        if self.tool_executor is None:
             self.tool_executor = ToolExecutor()
         
         self.tool_executor.registerTool(
@@ -130,7 +134,7 @@ class World:
             sympy.sympify
         )
 
-        print(self.tool_executor.getAvailableTools())
+        self.logger.info(f"可用工具: {self.tool_executor.getAvailableTools()}")
     
     def _start_tray(self):
         def _run_tray():
@@ -291,7 +295,7 @@ class World:
             height = rect.bottom - rect.top
             return (width, height)
         else:
-            print("get work area failed")
+            self.logger.error("获取工作区域失败")
             return (800, 600)
     
     def _position_to_work_area(self):
@@ -323,7 +327,7 @@ class World:
                 icon = pygame.image.load(icon_path)
                 pygame.display.set_icon(icon)
             except Exception as e:
-                print(f"set icon failed: {e}")
+                self.logger.error(f"设置图标失败: {e}")
 
         ico_path = constants.BUNNY_ICON_ICO
         if getattr(sys, "frozen", False):
@@ -352,7 +356,7 @@ class World:
                 ctypes.windll.user32.SendMessageW(self.hwnd, WM_SETICON, ICON_SMALL, hicon)
                 ctypes.windll.user32.SendMessageW(self.hwnd, WM_SETICON, ICON_BIG, hicon)
         except Exception as e:
-            print(f"set win32 icon failed: {e}")
+            self.logger.error(f"设置 Win32 图标失败: {e}")
 
     def _set_transparent(self):
         GWL_EXSTYLE = -20
@@ -370,15 +374,15 @@ class World:
             style = ctypes.windll.user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
             ctypes.windll.user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW)
         except Exception as e:
-            print(f"hide from taskbar failed: {e}")
-        
+            self.logger.error(f"从任务栏隐藏窗口失败: {e}")
+
     def _set_always_on_top(self):
         try:
             import pywinctl as pwc
             self.window = pwc.Window(self.hwnd)
             self.window.alwaysOnTop(True)
         except ImportError:
-            print("pywinctl not found.")
+            self.logger.error("没有安装 pywinctl 库")
     
     def _update_platforms_loop(self):
         while self.running:
@@ -397,7 +401,7 @@ class World:
                     if comment:
                         comment_bunny.set_comment(comment)
             except Exception as e:
-                print(f"Screen analyze failed: {e}")
+                self.logger.error(f"分析屏幕内容失败: {e}")
             time.sleep(random.randint(
                 constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS,
                 constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS
@@ -482,6 +486,31 @@ if __name__ == "__main__":
             ctypes.windll.user32.SetProcessDPIAware()
         except AttributeError:
             pass # 如果都不支持，则跳过
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler = TimedRotatingFileHandler(
+        filename=os.path.join(constants.DEFAULT_SAVE_DIR, "app.log"),
+        when="midnight",   # 每天凌晨 0 点切分
+        interval=1,        # 每 1 天
+        backupCount=30,    # 最多保留 30 天日志
+        encoding="utf-8",
+        delay=True
+    )
+    file_handler.setFormatter(formatter)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    logging.basicConfig(
+        level=logging.INFO,  # 只输出INFO及以上级别日志
+        format="%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        encoding="utf-8",
+        handlers=[file_handler, console_handler]
+    )
 
     world = World(fps=constants.GLOBAL_FPS)
     world.run()

@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import logging
 
 class ToolExecutor:
     """
@@ -6,15 +7,16 @@ class ToolExecutor:
     """
     def __init__(self):
         self.tools: Dict[str, Dict[str, Any]] = {}
+        self.logger = logging.getLogger(__name__)
 
     def registerTool(self, name: str, description: str, func: callable):
         """
         向工具箱中注册一个新工具。
         """
         if name in self.tools:
-            print(f"警告:工具 '{name}' 已存在，将被覆盖。")
+            self.logger.warning(f"工具 '{name}' 已存在, 将被覆盖")
         self.tools[name] = {"description": description, "func": func}
-        print(f"工具 '{name}' 已注册。")
+        self.logger.info(f"工具 '{name}' 已注册")
 
     def getTool(self, name: str) -> callable:
         """

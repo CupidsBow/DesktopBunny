@@ -9,7 +9,10 @@ from components.sprite import Sprite
 import sys
 from constants import constants
 from typing import List
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class BunnyState(Enum):
     IDLE = 0
@@ -481,14 +484,9 @@ class Bunny:
     def eat_carrot(self, carrot_path=None):
         if carrot_path and os.path.isfile(carrot_path):
             try:
-                carrot_name = os.path.basename(carrot_path)
-                # if "carrot" in carrot_name.lower():
                 os.remove(carrot_path)
                 self.satiety = min(self.satiety + 20, 100)
                 self.set_comment("嗷呜~好甜的萝卜呀~")
-                print(f"carrot eaten: {carrot_path}, current satiety: {self.satiety}")
-                # else:
-                #     self.set_comment("我不吃萝卜以外的东西~")
-                #     print(f"File is not a carrot: {carrot_path}")
+                logger.info(f"{self.name} 吃掉了 {carrot_path}, 现在的饱食度: {self.satiety}")
             except Exception as e:
-                print(f"Failed to delete file: {e}")
+                logger.error(f"吃胡萝卜失败: {e}")

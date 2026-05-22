@@ -19,6 +19,7 @@ from manager.save_manager import SaveManager
 import tkinter as tk
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
+from tools.switch_light import turn_on_the_light, turn_off_the_light
 
 
 class World:
@@ -43,11 +44,13 @@ class World:
         self.screen_analyze_enabled = False
 
         self.detector = PlatformDetector()
+        self.tool_executor = ToolExecutor()
         self.screen_analyzer = ScreenAnalyzer(self.detector)
         self.save_manager = SaveManager()
-        self.model_manager = ModelManager()
+        self.model_manager = ModelManager(self.tool_executor)
         self.chat_root = None
         self.chat_window_thread = None
+        self.register_tools()
 
     def startup(self):
         pygame.init()
@@ -96,9 +99,6 @@ class World:
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
         self.auto_save_thread.start()
 
-        self.tool_executor = ToolExecutor()
-        self.register_tools()
-
     def register_tools(self):
         if self.tool_executor == None:
             self.tool_executor = ToolExecutor()
@@ -107,6 +107,21 @@ class World:
             "get_local_time",
             "一个获取当前时间的工具，返回格式为 %Y-%m-%d %H:%M:%S",
             get_local_time
+        )
+        self.tool_executor.registerTool(
+            "turn_on_the_light",
+            "一个可以打开灯的工具",
+            turn_on_the_light
+        )
+        self.tool_executor.registerTool(
+            "turn_off_the_light",
+            "一个可以关闭灯的工具",
+            turn_off_the_light
+        )
+        self.tool_executor.registerTool(
+            "retrieve_memory",
+            "检索你与用户的过往聊天记忆的工具，输入单个字符串短语作为查询条件，返回相关的记忆内容",
+            self.model_manager.retrieve_memory
         )
 
         print(self.tool_executor.getAvailableTools())

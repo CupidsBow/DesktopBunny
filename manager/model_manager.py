@@ -14,16 +14,25 @@ import sqlite3
 import os
 import json
 import threading
+from tools.tool_executor import ToolExecutor
+from constants import constants
+import re
 
 
 class ModelManager:
     """Ollama 模型管理器，负责截图分析、对话、长期记忆"""
 
-    def __init__(self):
+    def __init__(self, tool_executor):
         self.silicon_chat_model = constants.CHAT_MODEL
         self.embedding_model = constants.EMBEDDING_MODEL
         self.silicon_chat_url = constants.SILICONFLOW_CHAT_URL
         self.ollama_embedding_url = constants.LOCAL_OLLAMA_EMBEDDING_URL
+        self.tool_executor = tool_executor
+        self.react_agent = ReActAgent(
+            self,
+            self.tool_executor,
+            5
+        )
 
         self.init_memory_db()
 
@@ -114,28 +123,36 @@ class ModelManager:
             "content": user_input
         })
 
+        fact_answer = self.react_agent.run(user_input)
+        if not fact_answer:
+            fact_answer = "兔脑过载..."
+
         # --------------------- 【记忆检索：核心】 ---------------------
-        retrieval_query = self._prepare_retrieval_query(user_input)
-        # 再用标准query去搜记忆
-        relevant_memories = self.retrieve_memory(retrieval_query)
-        long_memory = ""
-        if len(relevant_memories) > 0:
-            long_memory = "\n".join([
-                f"• {m}" for m in relevant_memories
-            ])
+        # retrieval_query = self._prepare_retrieval_query(user_input)
+        # # 再用标准query去搜记忆
+        # relevant_memories = self.retrieve_memory(retrieval_query)
+        # long_memory = ""
+        # if len(relevant_memories) > 0:
+        #     long_memory = "\n".join([
+        #         f"• {m}" for m in relevant_memories
+        #     ])
         # ------------------------------------------------------------
 
         # 构建上下文：倒序加入历史，直到接近长度限制
         bunny_prompt = {
             "role": "system",
-            "content": constants.BUNNY_PROMPT.format(datetime.now().strftime("%Y年%m月%d日 %H:%M:%S"))
+            "content": constants.BUNNY_PROMPT
         }
-        # 把记忆拼进 system prompt
-        if len(long_memory) > 0:
-            bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
+        # 把记忆拼进 system prompt 检索记忆移到 agent 工具中
+        # if len(long_memory) > 0:
+        #     bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
 
-        # 拼接完整提示词
-        messages = [bunny_prompt] + self.chat_history
+        # ====================== 【最小改动：插入 fact_answer】 ======================
+        messages = [bunny_prompt] + self.chat_history + [
+            {"role": "user", "content": f"请根据这个信息自然口语化回复我：{fact_answer}"}
+        ]
+        # ==========================================================================
+
         print(f"messages {messages}")
         res = requests.post(
             url=self.silicon_chat_url,
@@ -170,12 +187,12 @@ class ModelManager:
         self.auto_save_memory_thread = threading.Thread(target=self.auto_save_memory, daemon=True)
         self.auto_save_memory_thread.start()
 
-        if len(self.chat_history) > 10:
-            # 归档 0 到 -10 的所有记录
-            self.archive_chat_range(0, -5)
+        if len(self.chat_history) > 20:
+            # 归档 0 到 -20 的所有记录
+            self.archive_chat_range(0, -10)
             
-            # 只保留最后 10 条
-            self.chat_history = self.chat_history[-5:]
+            # 只保留最后 20 条
+            self.chat_history = self.chat_history[-10:]
 
         self._play_notification_sound()
         return reply
@@ -416,33 +433,16 @@ class ModelManager:
             return {} if role is None else []
     
     # ---------- 3. 模型交互部分 重构 ----------
-    def send_request_to_chat_model(self, user_input: str, chat_history: List) -> str:
+    def send_request_to_chat_model(self, user_input: str) -> str:
         """
         与聊天模型对话，给出历史对话文件
         Returns: 模型回复
         """
-        # --------------------- 【记忆检索：核心】 ---------------------
-        retrieval_query = self._prepare_retrieval_query(user_input)
-        # 再用标准query去搜记忆
-        relevant_memories = self.retrieve_memory(retrieval_query)
-        long_memory = ""
-        if len(relevant_memories) > 0:
-            long_memory = "\n".join([
-                f"• {m}" for m in relevant_memories
-            ])
-        # ------------------------------------------------------------
-
-        # 构建上下文：倒序加入历史，直到接近长度限制
-        bunny_prompt = {
-            "role": "system",
-            "content": constants.BUNNY_PROMPT.format(datetime.now().strftime("%Y年%m月%d日 %H:%M:%S"))
-        }
-        # 把记忆拼进 system prompt
-        if len(long_memory) > 0:
-            bunny_prompt["content"] += f"\n\n你可以参考的你与用户的长期记忆：\n{long_memory}"
-
         # 拼接完整提示词
-        messages = [bunny_prompt] + chat_history
+        messages = [{
+            "role": "user",
+            "content": user_input
+        }]
         print(f"messages {messages}")
         res = requests.post(
             url=self.silicon_chat_url,
@@ -465,3 +465,99 @@ class ModelManager:
             return None
 
         return reply
+
+
+class ReActAgent:
+    def __init__(self, model_manager: ModelManager, tool_executor: ToolExecutor, max_steps: int = 5):
+        self.model_manager = model_manager
+        self.tool_executor = tool_executor
+        self.max_steps = max_steps
+        self.history = []
+
+    def run(self, question: str):
+        """
+        运行ReAct智能体来回答一个问题。
+        """
+        self.history = [] # 每次运行时重置历史记录
+        current_step = 0
+
+        while current_step < self.max_steps:
+            current_step += 1
+            print(f"--- 第 {current_step} 步 ---")
+
+            # 1. 格式化提示词
+            tools_desc = self.tool_executor.getAvailableTools()
+            history_str = "\n".join(self.history)
+            prompt = constants.REACT_PROMPT_TEMPLATE.format(
+                tools=tools_desc,
+                question=question,
+                history=history_str
+            )
+
+            # 2. 调用LLM进行思考
+            response_text = self.model_manager.send_request_to_chat_model(prompt)
+            
+            if not response_text:
+                print("错误:LLM未能返回有效响应。")
+                break
+
+            # (这段逻辑在 run 方法的 while 循环内)
+            # 3. 解析LLM的输出
+            thought, action = self._parse_output(response_text)
+            
+            if thought:
+                print(f"思考: {thought}")
+
+            if not action:
+                print("警告:未能解析出有效的Action，流程终止。")
+                break
+
+            # 4. 执行Action
+            if action.startswith("Finish"):
+                # 如果是Finish指令，提取最终答案并结束
+                final_answer = re.match(r"Finish\[(.*)\]", action).group(1)
+                print(f"最终答案: {final_answer}")
+                return final_answer
+            
+            tool_name, tool_input = self._parse_action(action)
+            if not tool_name and not tool_input:
+                # ... 处理无效Action格式 ...
+                continue
+
+            print(f"行动: {tool_name}[{tool_input}]")
+            
+            tool_function = self.tool_executor.getTool(tool_name)
+            if not tool_function:
+                observation = f"错误:未找到名为 '{tool_name}' 的工具。"
+            else:
+                observation = tool_function(tool_input) # 调用真实工具
+            # (这段逻辑紧随工具调用之后，在 while 循环的末尾)
+            print(f"观察: {observation}")
+            
+            # 将本轮的Action和Observation添加到历史记录中
+            self.history.append(f"Action: {action}")
+            self.history.append(f"Observation: {observation}")
+
+        # 循环结束
+        print("已达到最大步数，流程终止。")
+        return None
+
+    # (这些方法是 ReActAgent 类的一部分)
+    def _parse_output(self, text: str):
+        """解析LLM的输出，提取Thought和Action。
+        """
+        # Thought: 匹配到 Action: 或文本末尾
+        thought_match = re.search(r"Thought:\s*(.*?)(?=\nAction:|$)", text, re.DOTALL)
+        # Action: 匹配到文本末尾
+        action_match = re.search(r"Action:\s*(.*?)$", text, re.DOTALL)
+        thought = thought_match.group(1).strip() if thought_match else None
+        action = action_match.group(1).strip() if action_match else None
+        return thought, action
+
+    def _parse_action(self, action_text: str):
+        """解析Action字符串，提取工具名称和输入。
+        """
+        match = re.match(r"(\w+)\[(.*)\]", action_text, re.DOTALL)
+        if match:
+            return match.group(1), match.group(2)
+        return None, None

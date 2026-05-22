@@ -40,7 +40,7 @@ class ChatWindow:
         # 确保 ModelManager 存在
         if not hasattr(self.world, 'model_manager'):
             from manager.model_manager import ModelManager
-            self.world.model_manager = ModelManager(detector=self.world.detector)
+            self.world.model_manager = ModelManager(self.world.tool_executor)
         self.model_manager = self.world.model_manager
 
         # ====================== 关键修改：使用 grid 布局，固定输入框高度 ======================
@@ -144,14 +144,24 @@ class ChatWindow:
                 text="发送"
             )
         else:
-            self.send_btn.config(
-                state=tk.DISABLED,
-                bg=self.DISABLE_BG,
-                fg=self.DISABLE_FG,
-                activebackground=self.DISABLE_BG,
-                activeforeground=self.DISABLE_FG,
-                text="兔兔思考中..."
-            )
+            if self.is_waiting_reply:
+                self.send_btn.config(
+                    state=tk.DISABLED,
+                    bg=self.DISABLE_BG,
+                    fg=self.DISABLE_FG,
+                    activebackground=self.DISABLE_BG,
+                    activeforeground=self.DISABLE_FG,
+                    text="兔兔思考中..."
+                )
+            else:
+                self.send_btn.config(
+                    state=tk.DISABLED,
+                    bg=self.DISABLE_BG,
+                    fg=self.DISABLE_FG,
+                    activebackground=self.DISABLE_BG,
+                    activeforeground=self.DISABLE_FG,
+                    text="发送"
+                )
 
     # ====================== 原有功能不变 ======================
     def new_line(self, event):
@@ -183,11 +193,11 @@ class ChatWindow:
         self.update_send_btn_status()
         try:
             reply = self.model_manager.chat(user_text)
-            self.update_send_btn_status()
             self.master.after(0, self._append_message, "Alice", reply)
         except Exception as e:
             reply = f"（聊天出错：{e}）"
         self.is_waiting_reply = False
+        self.update_send_btn_status()
 
     def _append_message(self, sender, text):
         """消息展示优化"""

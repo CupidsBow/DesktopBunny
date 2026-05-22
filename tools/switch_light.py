@@ -1,7 +1,5 @@
 import win32com.client
 import time
-import asyncio
-import edge_tts
 
 
 ORDER_PREFIX = "天猫精灵"
@@ -22,11 +20,3 @@ def turn_off_the_light(value = "off") -> str:
     speaker.Speak(TURN_OFF_THE_LIGHT_ORDER)
     print("调用 turn_off_the_light")
     return "关灯成功"
-
-
-def speak(text: str):
-    async def _speak():
-        communicate = edge_tts.Communicate(text, "zh-CN-XiaoxiaoNeural")
-        await communicate.listen()
-
-    asyncio.run(_speak())

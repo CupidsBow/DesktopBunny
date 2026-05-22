@@ -20,6 +20,7 @@ import tkinter as tk
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
 from tools.switch_light import turn_on_the_light, turn_off_the_light
+import sympy
 
 
 class World:
@@ -122,6 +123,11 @@ class World:
             "retrieve_memory",
             "检索你与用户的过往聊天记忆的工具，输入单个字符串短语作为查询条件，返回相关的记忆内容",
             self.model_manager.retrieve_memory
+        )
+        self.tool_executor.registerTool(
+            "calc",
+            "计算单个表达式的值并返回结果",
+            sympy.sympify
         )
 
         print(self.tool_executor.getAvailableTools())

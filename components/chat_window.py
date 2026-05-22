@@ -66,7 +66,7 @@ class ChatWindow:
 
         # -------------------- 聊天记录区域 --------------------
         self.chat_display = scrolledtext.ScrolledText(
-            main_container, wrap=tk.WORD, state='disabled', font=("Microsoft YaHei UI", 12),
+            main_container, wrap=tk.CHAR, state='disabled', font=("Microsoft YaHei UI", 12),
             padx=15, pady=15, relief=tk.FLAT, bg="#f5f5f5"
         )
         # 放在标题栏下方，占据剩余空间

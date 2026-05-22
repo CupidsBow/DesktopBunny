@@ -30,8 +30,7 @@ class ModelManager:
         self.tool_executor = tool_executor
         self.react_agent = ReActAgent(
             self,
-            self.tool_executor,
-            5
+            self.tool_executor
         )
 
         self.init_memory_db()
@@ -468,7 +467,7 @@ class ModelManager:
 
 
 class ReActAgent:
-    def __init__(self, model_manager: ModelManager, tool_executor: ToolExecutor, max_steps: int = 5):
+    def __init__(self, model_manager: ModelManager, tool_executor: ToolExecutor, max_steps: int = 20):
         self.model_manager = model_manager
         self.tool_executor = tool_executor
         self.max_steps = max_steps
@@ -515,7 +514,7 @@ class ReActAgent:
             # 4. 执行Action
             if action.startswith("Finish"):
                 # 如果是Finish指令，提取最终答案并结束
-                final_answer = re.match(r"Finish\[(.*)\]", action).group(1)
+                final_answer = re.match(r"Finish\[(.*)\]", action, re.DOTALL).group(1)
                 print(f"最终答案: {final_answer}")
                 return final_answer
             

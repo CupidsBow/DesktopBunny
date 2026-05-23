@@ -187,6 +187,43 @@ class ModelManager:
         resp = requests.post(self.ollama_embedding_url, json=payload, timeout=30)
         resp.raise_for_status()
         return resp.json()["embeddings"][0]
+    
+    def generate_hypothetical_memory(self, query: str) -> str:
+        """
+        HyDE 核心：根据用户问题，生成一条「假设的记忆文本」
+        生成格式完全贴合你的真实记忆："助手xxx" / "用户xxx" 短句
+        """
+        prompt = f"""用户现在问了一个问题：{query}
+    请你**只生成一句**符合格式的「假设性记忆」，用来检索历史记忆。
+    格式必须严格和真实记忆一样：
+    - 以"用户"或"助手"开头
+    - 简短陈述句，不超过20字
+    - 不要解释、不要多句、不要多余内容
+
+    请直接输出符合格式的假设记忆："""
+
+        try:
+            res = requests.post(
+                url=self.silicon_chat_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {constants.SILICONFLOW_API_KEY}"
+                },
+                json={
+                    "model": self.silicon_chat_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "enable_thinking": False
+                },
+                timeout=10
+            )
+            hypothetical = res.json()["choices"][0]["message"]["content"].strip()
+            # 严格过滤，只保留符合记忆格式的内容
+            if hypothetical.startswith(("用户", "助手")) and len(hypothetical) < 30:
+                return hypothetical
+            return query  # 生成失败 fallback 回原问题
+        except Exception as e:
+            self.logger.error(f"HyDE 生成假设记忆失败: {e}")
+            return query
 
     def summarize_chat(self, chat_history: list) -> list:
         """
@@ -201,7 +238,7 @@ class ModelManager:
     每条事实必须明确指出是关于“用户”还是“助手”的。
     格式：每行一条，开头用 [user] 或 [assistant] 标记角色，然后写一句话事实（不超过20字），不要序号。
 
-    只提取用户和助手的：习惯、偏好、禁忌、特点。
+    只提取用户和助手的：习惯、偏好、禁忌、特点，不记录事件。
     不同主题分开成多条，最多输出5条，若没有提取到则不输出。
 
     对话内容：
@@ -303,7 +340,12 @@ class ModelManager:
                     memories.append(res[0])
             return memories
 
-        query_emb = self.get_embedding(query)
+        # ========== HyDE 优化：用假设记忆替换原查询 ==========
+        hypo_memory = self.generate_hypothetical_memory(query)
+        self.logger.info(f"[HyDE] 原问题: {query} → 假设记忆: {hypo_memory}")
+        query_emb = self.get_embedding(hypo_memory)
+        # ====================================================
+
         conn = sqlite3.connect(self.db_path)
 
         results = []
@@ -315,6 +357,10 @@ class ModelManager:
         conn.close()
         # 去重（相同文本可能被重复保存）
         return list(dict.fromkeys(results))
+    
+    def retrieve_context(self, value: str) -> list:
+        """检索过往与用户对话上下文中的短期记忆"""
+        return self.chat_history
 
     def auto_save_memory(self):
         """自动总结对话 → 按角色分别保存多条记忆"""

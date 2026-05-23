@@ -125,8 +125,13 @@ class World:
         )
         self.tool_executor.registerTool(
             "retrieve_memory",
-            "检索你与用户的过往聊天记忆的工具，输入单个字符串短语作为查询条件，返回相关的记忆内容",
+            "[长期记忆]检索你与用户的过往聊天长期记忆的工具，包括你与用户的习惯、偏好、禁忌、特点，输入单个字符串询问短语作为查询条件，返回相关的记忆内容",
             self.model_manager.retrieve_memory
+        )
+        self.tool_executor.registerTool(
+            "retrieve_context",
+            "[短期记忆]检索与用户近期几轮对话的内容",
+            self.model_manager.retrieve_context
         )
         self.tool_executor.registerTool(
             "calc",

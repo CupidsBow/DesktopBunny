@@ -1,4 +1,8 @@
 import threading
+import hashlib
+import re
+import html
+import tempfile
 import tkinter.scrolledtext as scrolledtext
 import tkinter as tk
 from constants import constants
@@ -7,6 +11,28 @@ from PIL import Image, ImageTk
 import sys
 import os
 import logging
+
+try:
+    from tkhtmlview import HTMLScrolledText
+except ImportError:
+    HTMLScrolledText = None
+
+try:
+    import markdown2
+    def _markdown_to_html(text):
+        return markdown2.markdown(text, extras=["fenced-code-blocks", "tables", "strike", "cuddled-lists"])
+except ImportError:
+    def _markdown_to_html(text):
+        return "<pre>{}</pre>".format(html.escape(text))
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except Exception:
+    plt = None
+    HAS_MATPLOTLIB = False
 
 
 class ChatWindow:
@@ -68,12 +94,23 @@ class ChatWindow:
         title_label.pack(side=tk.LEFT, padx=20)
 
         # -------------------- 聊天记录区域 --------------------
-        self.chat_display = scrolledtext.ScrolledText(
-            main_container, wrap=tk.CHAR, state='disabled', font=("Microsoft YaHei UI", 12),
-            padx=15, pady=15, relief=tk.FLAT, bg="#f5f5f5"
-        )
-        # 放在标题栏下方，占据剩余空间
-        self.chat_display.grid(row=0, column=0, sticky="nsew", pady=(48,0))
+        self.temp_dir = tempfile.mkdtemp(prefix='chat_html_')
+        if HTMLScrolledText is not None:
+            self.chat_display = HTMLScrolledText(
+                main_container, html="", wrap=tk.WORD, state='disabled', font=("Microsoft YaHei UI", 12),
+                padx=15, pady=15, relief=tk.FLAT, background="#f5f5f5", highlightthickness=0
+            )
+            self.chat_display.grid(row=0, column=0, sticky="nsew", pady=(48,0))
+            self.use_html_display = True
+            self.chat_html = []
+        else:
+            self.chat_display = scrolledtext.ScrolledText(
+                main_container, wrap=tk.WORD, state='disabled', font=("Microsoft YaHei UI", 12),
+                padx=15, pady=15, relief=tk.FLAT, bg="#f5f5f5"
+            )
+            self.chat_display.grid(row=0, column=0, sticky="nsew", pady=(48,0))
+            self.use_html_display = False
+            self.chat_html = []
 
         # -------------------- 底部输入区域（固定高度，绝不缩小） --------------------
         INPUT_FRAME_HEIGHT = 140  # 输入框总高度，固定值
@@ -166,6 +203,68 @@ class ChatWindow:
                     text="发送"
                 )
 
+    def _render_formula_image(self, expr):
+        """Render a LaTeX formula to a PNG image and return the path."""
+        if not HAS_MATPLOTLIB:
+            return f"<code>{html.escape(expr)}</code>"
+
+        expr_key = hashlib.md5(expr.encode("utf-8")).hexdigest()
+        filename = f"formula_{expr_key}.png"
+        output_path = os.path.join(self.temp_dir, filename)
+        if not os.path.exists(output_path):
+            fig = plt.figure(figsize=(0.01, 0.01))
+            fig.text(0, 0, f"${expr}$", fontsize=16)
+            plt.axis("off")
+            fig.patch.set_alpha(0)
+            plt.savefig(output_path, dpi=200, bbox_inches="tight", pad_inches=0.05, transparent=True)
+            plt.close(fig)
+
+        return output_path.replace("\\", "/")
+
+    def _convert_markdown_and_math(self, text):
+        """Convert markdown text and embedded LaTeX formulas to HTML."""
+        formulas = []
+
+        def replace_block(match):
+            expr = match.group(1).strip()
+            formulas.append(expr)
+            return f"@@FORMULA{len(formulas) - 1}@@"
+
+        def replace_inline(match):
+            expr = match.group(1).strip()
+            formulas.append(expr)
+            return f"@@FORMULA{len(formulas) - 1}@@"
+
+        text = re.sub(r"\$\$(.+?)\$\$", replace_block, text, flags=re.S)
+        text = re.sub(r"\$(.+?)\$", replace_inline, text)
+        html_text = _markdown_to_html(text)
+
+        for index, expr in enumerate(formulas):
+            img_path = self._render_formula_image(expr)
+            if img_path.endswith(".png"):
+                replacement = f"<img src=\"{img_path}\" style=\"vertical-align:middle; max-height:1.4em;\"/>"
+            else:
+                replacement = img_path
+            html_text = html_text.replace(f"@@FORMULA{index}@@", replacement)
+
+        return html_text
+
+    def _format_message_html(self, sender, text):
+        body_html = self._convert_markdown_and_math(text)
+        return (
+            "<div style=\"margin-bottom:14px;\">"
+            f"<p style=\"margin:0 0 8px 0;font-weight:bold;color:#1A3E72;\">{html.escape(sender)}</p>"
+            f"<div>{body_html}</div>"
+            "</div>"
+        )
+
+    def _wrap_chat_html(self):
+        return (
+            "<div style=\"background:#f5f5f5; padding:12px; margin:0; font-family: 'Microsoft YaHei UI', sans-serif;\">"
+            + "".join(self.chat_html)
+            + "</div>"
+        )
+
     # ====================== 原有功能不变 ======================
     def new_line(self, event):
         """Shift+回车换行"""
@@ -203,22 +302,33 @@ class ChatWindow:
         self.update_send_btn_status()
 
     def _append_message(self, sender, text):
-        """消息展示优化"""
+        """消息展示优化：支持 HTML/Markdown 与数学公式渲染"""
         self.chat_display.config(state='normal')
-        if self.chat_display.get("1.0", tk.END).strip():
-            self.chat_display.insert(tk.END, "\n")
-        
-        if sender == "我":
-            self.chat_display.insert(tk.END, f"我：{text}\n")
+        if self.use_html_display:
+            if self.chat_display.get("1.0", tk.END).strip():
+                self.chat_html.append("<hr style='border:none;border-top:1px solid #e0e0e0;margin:10px 0;'>")
+            self.chat_html.append(self._format_message_html(sender, text))
+            self.chat_display.set_html(self._wrap_chat_html())
         else:
-            self.chat_display.insert(tk.END, f"Alice：{text}\n")
-            
+            if self.chat_display.get("1.0", tk.END).strip():
+                self.chat_display.insert(tk.END, "\n")
+            self.chat_display.insert(tk.END, f"{sender}：{text}\n")
         self.chat_display.config(state='disabled')
         self.chat_display.see(tk.END)
 
     def refresh_chat_display(self):
         self.chat_display.config(state='normal')
-        self.chat_display.delete("1.0", tk.END)
-        for msg in self.model_manager.chat_history:
-            self._append_message("我" if msg["role"] == "user" else "Alice", msg["content"])
+        if self.use_html_display:
+            self.chat_html = []
+            for msg in self.model_manager.chat_history:
+                sender = "我" if msg["role"] == "user" else "Alice"
+                if self.chat_html:
+                    self.chat_html.append("<hr style='border:none;border-top:1px solid #e0e0e0;margin:10px 0;'>")
+                self.chat_html.append(self._format_message_html(sender, msg["content"]))
+            self.chat_display.set_html(self._wrap_chat_html())
+        else:
+            self.chat_display.delete("1.0", tk.END)
+            for msg in self.model_manager.chat_history:
+                sender = "我" if msg["role"] == "user" else "Alice"
+                self.chat_display.insert(tk.END, f"{sender}：{msg['content']}\n")
         self.chat_display.config(state='disabled')

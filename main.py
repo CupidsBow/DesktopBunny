@@ -130,7 +130,7 @@ class World:
         )
         self.tool_executor.registerTool(
             "retrieve_context",
-            "[短期记忆]检索与用户近期几轮对话的内容",
+            "[短期记忆]检索与用户近期几轮对话的内容，无需入参",
             self.model_manager.retrieve_context
         )
         self.tool_executor.registerTool(

@@ -19,10 +19,10 @@ from manager.save_manager import SaveManager
 import tkinter as tk
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
-from tools.switch_light import turn_on_the_light, turn_off_the_light
 import sympy
 import logging
 from logging.handlers import TimedRotatingFileHandler
+from tools.bunny_speak import bunny_speak
 
 
 class World:
@@ -114,18 +114,8 @@ class World:
             get_local_time
         )
         self.tool_executor.registerTool(
-            "turn_on_the_light",
-            "一个可以打开灯的工具",
-            turn_on_the_light
-        )
-        self.tool_executor.registerTool(
-            "turn_off_the_light",
-            "一个可以关闭灯的工具",
-            turn_off_the_light
-        )
-        self.tool_executor.registerTool(
             "retrieve_memory",
-            "[长期记忆]检索你与用户的过往聊天长期记忆的工具，包括你与用户的习惯、偏好、禁忌、特点，输入单个字符串询问短语作为查询条件，返回相关的记忆内容",
+            "[长期记忆]检索你与用户的过往聊天长期记忆的工具，包括你与用户的习惯、偏好、禁忌、特点，输入单个疑问句作为查询条件，返回相关的记忆内容",
             self.model_manager.retrieve_memory
         )
         self.tool_executor.registerTool(
@@ -405,6 +395,7 @@ class World:
                     comment = self.screen_analyzer.analyze_screen(comment_bunny)
                     if comment:
                         comment_bunny.set_comment(comment)
+                        bunny_speak(comment)
             except Exception as e:
                 self.logger.error(f"分析屏幕内容失败: {e}")
             time.sleep(random.randint(

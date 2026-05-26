@@ -22,7 +22,6 @@ from tools.get_local_time import get_local_time
 import sympy
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from tools.bunny_speak import bunny_speak
 
 
 class World:
@@ -395,7 +394,6 @@ class World:
                     comment = self.screen_analyzer.analyze_screen(comment_bunny)
                     if comment:
                         comment_bunny.set_comment(comment)
-                        bunny_speak(comment)
             except Exception as e:
                 self.logger.error(f"分析屏幕内容失败: {e}")
             time.sleep(random.randint(

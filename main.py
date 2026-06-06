@@ -19,6 +19,7 @@ from manager.save_manager import SaveManager
 import tkinter as tk
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
+from tools.switch_air_conditioner import switch_on_air_conditioner, switch_off_air_conditioner
 import sympy
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -126,6 +127,16 @@ class World:
             "calc",
             "计算单个表达式的值并返回结果",
             sympy.sympify
+        )
+        self.tool_executor.registerTool(
+            "switch_on_air_conditioner",
+            "发送红外信号打开空调，无需入参，返回 True 或者 False 表示开关结果",
+            switch_on_air_conditioner
+        )
+        self.tool_executor.registerTool(
+            "switch_off_air_conditioner",
+            "发送红外信号关闭空调，无需入参，返回 True 或者 False 表示开关结果",
+            switch_off_air_conditioner
         )
 
         self.logger.info(f"可用工具: {self.tool_executor.getAvailableTools()}")

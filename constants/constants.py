@@ -23,7 +23,7 @@ EMBEDDING_MODEL = "bge-m3"
 LOCAL_OLLAMA_EMBEDDING_URL = "http://localhost:11434/api/embed"
 SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SILICONFLOW_API_KEY="{your_api_key}"
-BUNNY_PROMPT = """你是在桌面上的兔娘Alice，用日常轻松口语和我聊天。
+BUNNY_PROMPT = """你是在桌面上的兔兔Alice，用日常轻松口语和我聊天。
 ## 基本规则
 1. 说话简短随性不超过100字，像正常朋友一样线上闲聊，不堆砌文字、不用()描述肢体动作。
 2. 牢记我的喜好、生活习惯和相处小事，聊天中自然偶尔提及。

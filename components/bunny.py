@@ -40,7 +40,7 @@ class Bunny:
         self.satiety_timer = self.SATIETY_TIME
 
         self.bunny_size = pygame.math.Vector2(48.0, 64.0)
-        self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8)
+        self.sprite = Sprite(constants.BUNNY_IDLE_PNG, 8, 1254, draw_size=128)
         self.current_state = BunnyState.IDLE
         self.current_position = pygame.math.Vector2(
             random.randint(int(screen_size.x / 4), int(screen_size.x * 3 / 4)),

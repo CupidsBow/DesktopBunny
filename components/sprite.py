@@ -3,8 +3,10 @@ import os
 import sys
 
 class Sprite:
-    def __init__(self, sprite_path: str, total_frames, sprite_size=32):
+    def __init__(self, sprite_path: str, total_frames, sprite_size=32, scale_factor=4, draw_size=None):
         self.sprite_size = sprite_size
+        self.scale_factor = scale_factor
+        self.draw_size = draw_size if draw_size is not None else sprite_size * scale_factor
 
         if getattr(sys, "frozen", False):
             sprite_path = os.path.join(sys._MEIPASS, sprite_path)
@@ -24,7 +26,7 @@ class Sprite:
                             self.sprite_size,
                             self.sprite_size
                         )),
-                    (self.sprite_size * 4, self.sprite_size * 4)
+                    (self.draw_size, self.draw_size)
                 )
             )
         self.flipped_frame_sprites = [pygame.transform.flip(frame, True, False) for frame in self.frame_sprites]

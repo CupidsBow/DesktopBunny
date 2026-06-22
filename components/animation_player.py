@@ -3,11 +3,11 @@ from constants import constants
 
 class AnimationPlayer:
     def __init__(self):
-        self.IDLE_SPRITE = Sprite(constants.BUNNY_IDLE_PNG, 8)
-        self.JUMP_SPRITE = Sprite(constants.BUNNY_JUMP_PNG, 4)
-        self.FLOATING_SPRITE = Sprite(constants.BUNNY_FLOATING_PNG, 4)
-        self.FALLING_SPRITE = Sprite(constants.BUNNY_FALLING_PNG, 4)
-        self.SPECIAL_SPRITE = Sprite(constants.BUNNY_SPECIAL_PNG, 4)
+        self.IDLE_SPRITE = Sprite(constants.BUNNY_IDLE_PNG, 8, 1254, draw_size=128)
+        self.JUMP_SPRITE = Sprite(constants.BUNNY_JUMP_PNG, 4, 1254, draw_size=128)
+        self.FLOATING_SPRITE = Sprite(constants.BUNNY_FLOATING_PNG, 4, 1254, draw_size=128)
+        self.FALLING_SPRITE = Sprite(constants.BUNNY_FALLING_PNG, 4, 1254, draw_size=128)
+        self.SPECIAL_SPRITE = Sprite(constants.BUNNY_SPECIAL_PNG, 4, 1254, draw_size=128)
         self.BUNNY_GIRL_IDLE_SPRITE = Sprite(constants.BUNNY_GIRL_IDLE_PNG, 6, 64)
         self.BUNNY_GIRL_MOVE_SPRITE = Sprite(constants.BUNNY_GIRL_MOVE_PNG, 5, 64)
 

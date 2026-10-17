@@ -15,36 +15,22 @@ PLATFORM_HEIGHT = 100
 PLATFORM_DETECT_TIME_INTERVAL_SECONDS = 2
 BUNNY_MAX_NUM = 5
 PLATFORM_MAX_NUM = 10
-SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS = 120
-SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS = 180
+# --- 读屏幕吐槽 ---
+SCREEN_ANALYZE_MODEL = "zai-org/GLM-4.5V"
+# 关掉思考链。实测 GLM-4.5V 从 4.5 秒降到 1.0 秒，而且开着 thinking 时
+# 偶尔会把 <|begin_of_box|> 这类模板控制符漏进正文，画在屏幕上很难看。
+# 注意这个参数是模型相关的：换成 Qwen3-VL-30B-A3B、Qwen3-VL-32B-Thinking
+# 等不支持它的模型会直接报 20015，那时把这里改成 None 即可。
+SCREEN_ANALYZE_ENABLE_THINKING = False
+SCREEN_ANALYZE_POLL_INTERVAL_SECONDS = 1     # 前台窗口轮询间隔
+SCREEN_ANALYZE_COOLDOWN_SECONDS = 60         # 两次吐槽最短间隔，防止来回切窗口刷屏
+SCREEN_ANALYZE_DWELL_SECONDS = 600           # 同一窗口停留超过这么久也触发一次
+SCREEN_ANALYZE_OTHER_WINDOW_NUM = 5          # 作为上下文带上几个其他窗口
+SCREEN_ANALYZE_RECENT_QUIPS = 5              # 记住最近说过几句，避免重复
+SCREEN_ANALYZE_IMAGE_MAX_SIZE = 640          # 截图长边上限（再高性价比很低，见 README）
+SCREEN_ANALYZE_JPEG_QUALITY = 40
+SCREEN_ANALYZE_TIMEOUT_SECONDS = 15          # 实测 GLM-4.5V 约 1 秒；注意超时会阻塞下面的轮询循环
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
-CHAT_MODEL = "Qwen/Qwen3.5-397B-A17B"
-EMBEDDING_MODEL = "bge-m3"
-LOCAL_OLLAMA_EMBEDDING_URL = "http://localhost:11434/api/embed"
 SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
-SILICONFLOW_API_KEY="{your_api_key}"
-BUNNY_PROMPT = """你是在桌面上的兔娘Alice，用日常轻松口语和我聊天。
-## 基本规则
-1. 说话简短随性不超过100字，像正常朋友一样线上闲聊，不堆砌文字、不用()描述肢体动作。
-2. 牢记我的喜好、生活习惯和相处小事，聊天中自然偶尔提及。
-3. 必要时可以使用markdown格式表达内容，但不要过度使用。
-"""
-REACT_PROMPT_TEMPLATE = """
-请注意，你是一个有能力调用外部工具的智能助手，你叫Alice。
-
-可用工具如下:
-{tools}
-
-请严格按照以下格式进行回应:
-
-Thought: 你的思考过程，用于分析问题、拆解任务和规划下一步行动。
-Action: 你决定采取的行动，必须是以下格式之一:
-- `{{tool_name}}[{{tool_input}}]`:调用一个可用工具。
-- `Finish[最终答案]`:当你认为已经获得最终答案时。
-- 当你收集到足够的信息，能够回答用户的最终问题时，你必须在Action:字段后使用 Finish[最终答案] 来输出最终答案，必要时可以使用markdown公式。
-
-现在，请开始解决以下问题:
-Question: {question}
-History: {history}
-"""
+SILICONFLOW_API_KEY="sk-wzeeyxwvuylblahkproiburdhapeaoqrwyloqjnwbpximkee"
 BUNNY_NAME_LIST = ["David", "Michael", "John", "Tom", "Jack", "Kevin", "Peter", "Paul", "Henry", "Alan", "Mark", "Tony", "Jimmy", "Jerry", "Jason", "Brian", "Eric", "Nick", "Mary", "Linda", "Lisa", "Amy", "Sarah", "Anna", "Lucy", "Lily", "Nancy", "Helen", "Jenny", "Jessie", "Rita", "Rose", "Emma", "Grace", "Cindy"]

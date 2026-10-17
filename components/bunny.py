@@ -14,6 +14,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_COMMENT_FONT_PATHS = [
+    "C:/Windows/Fonts/msyh.ttc",        # 微软雅黑
+    "C:/Windows/Fonts/simhei.ttf",       # 黑体
+    "C:/Windows/Fonts/simsun.ttc",       # 宋体
+    "C:/Windows/Fonts/msyhbd.ttc",       # 微软雅黑粗体
+]
+_comment_font_cache = {}
+
+
+def _get_comment_font(size: int = 22) -> pygame.font.Font:
+    """加载并缓存支持中文的字体（字体创建开销大，所有 Bunny 共用同一份）"""
+    if size not in _comment_font_cache:
+        font = None
+        for path in _COMMENT_FONT_PATHS:
+            if os.path.exists(path):
+                font = pygame.font.Font(path, size)
+                break
+        if font is None:
+            # 兜底：用系统默认字体（可能不支持中文）
+            font = pygame.font.Font(None, size)
+        _comment_font_cache[size] = font
+    return _comment_font_cache[size]
+
+
 class BunnyState(Enum):
     IDLE = 0
     JUMP = 1
@@ -63,7 +87,7 @@ class Bunny:
         else:
             self.jump_sound = pygame.mixer.Sound(constants.JUMP_WAV_PATH)
 
-        self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, 1000.0))]
+        self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, constants.PLATFORM_HEIGHT))]
 
     def set_platforms(self, platforms: List[Platform]):
         self.platforms = platforms
@@ -76,25 +100,9 @@ class Bunny:
     def _draw_speech_bubble(self, screen: pygame.Surface):
         if not self.current_comment:
             return
-        
-        # ✅ 使用支持中文的字体
-        font_paths = [
-            "C:/Windows/Fonts/msyh.ttc",        # 微软雅黑
-            "C:/Windows/Fonts/simhei.ttf",       # 黑体
-            "C:/Windows/Fonts/simsun.ttc",       # 宋体
-            "C:/Windows/Fonts/msyhbd.ttc",       # 微软雅黑粗体
-        ]
-        
-        font = None
-        for path in font_paths:
-            if os.path.exists(path):
-                font = pygame.font.Font(path, 22)
-                break
-        
-        if font is None:
-            # 兜底：用系统默认字体（可能不支持中文）
-            font = pygame.font.Font(None, 22)
-        
+
+        font = _get_comment_font(22)
+
         # 气泡位置（兔子头上方）
         bunny_top = self.current_position.y - self.bunny_size.y / 2
         bubble_x = self.current_position.x

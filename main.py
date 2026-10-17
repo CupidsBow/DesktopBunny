@@ -6,20 +6,17 @@ import os
 import threading
 import time
 from components.bunny import Bunny
-from components.chat_window import ChatWindow
 from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
-from manager.model_manager import ModelManager
 from tools.screen_analyzer import ScreenAnalyzer
+from tools.window_watcher import WindowWatcher
 import random
 import functools
 from manager.save_manager import SaveManager
-import tkinter as tk
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
-from tools.switch_air_conditioner import switch_on_air_conditioner, switch_off_air_conditioner
 import sympy
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -51,10 +48,9 @@ class World:
         self.detector = PlatformDetector()
         self.tool_executor = ToolExecutor()
         self.screen_analyzer = ScreenAnalyzer(self.detector)
+        self.window_watcher = WindowWatcher()
+        self.recent_quips = []
         self.save_manager = SaveManager()
-        self.model_manager = ModelManager(self.tool_executor)
-        self.chat_root = None
-        self.chat_window_thread = None
         self.register_tools()
 
     def startup(self):
@@ -87,12 +83,10 @@ class World:
 
         bunny_data = self.save_manager.load()
         if bunny_data == {}:
-            self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), "Alice"))
+            self.bunnies.append(self._create_bunny("Alice"))
         else:
             for name, data in bunny_data.items():
-                bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), name)
-                bunny.satiety = data.get("satiety", bunny.satiety)
-                self.bunnies.append(bunny)
+                self.bunnies.append(self._create_bunny(name, data.get("satiety")))
         
         self._start_tray()
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
@@ -114,29 +108,9 @@ class World:
             get_local_time
         )
         self.tool_executor.registerTool(
-            "retrieve_memory",
-            "[长期记忆]检索你与用户的过往聊天长期记忆的工具，包括你与用户的习惯、偏好、禁忌、特点，输入单个疑问句作为查询条件，返回相关的记忆内容",
-            self.model_manager.retrieve_memory
-        )
-        self.tool_executor.registerTool(
-            "retrieve_context",
-            "[短期记忆]检索与用户近期几轮对话的内容，无需入参",
-            self.model_manager.retrieve_context
-        )
-        self.tool_executor.registerTool(
             "calc",
             "计算单个表达式的值并返回结果",
             sympy.sympify
-        )
-        self.tool_executor.registerTool(
-            "switch_on_air_conditioner",
-            "发送红外信号打开空调，无需入参，返回 True 或者 False 表示开关结果",
-            switch_on_air_conditioner
-        )
-        self.tool_executor.registerTool(
-            "switch_off_air_conditioner",
-            "发送红外信号关闭空调，无需入参，返回 True 或者 False 表示开关结果",
-            switch_off_air_conditioner
         )
 
         self.logger.info(f"可用工具: {self.tool_executor.getAvailableTools()}")
@@ -193,12 +167,6 @@ class World:
         # ② 固定菜单项（不变）
         control_items = [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "打开聊天",               # 虽然不可见，但最好保留文字便于调试
-                self._on_tray_open_chat_window,
-                default=True,             # 设为默认，左键单击时触发
-                visible=False            # 在右键菜单中不可见
-            ),
             pystray.MenuItem("添加一只兔兔", self._add_bunny),
             pystray.MenuItem("移除一只兔兔", self._delete_bunny),
             pystray.MenuItem(
@@ -211,20 +179,31 @@ class World:
                 self._on_tray_toggle_screen_analysis,
                 checked=lambda item: self.screen_analyze_enabled
             ),
-            pystray.MenuItem("交互", self._on_tray_open_chat_window),
             pystray.MenuItem("退出", self._on_tray_exit)
         ]
 
         return pystray.Menu(*(bunny_items + control_items))
+
+    def _create_bunny(self, name: str, satiety=None) -> Bunny:
+        """创建一只兔兔并让它进入 Idle 状态。
+
+        startup() 不能省：它才会播 Idle 动画并把 idle_timer 设成随机的 5~15 秒。
+        少了它兔子会定格在第 0 帧，而且 idle_timer 还是 0，开局第一帧就起跳。
+        """
+        bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), name)
+        if satiety is not None:
+            bunny.satiety = satiety
+        bunny.startup()
+        return bunny
 
     def _generate_bunny_name(self):
         index = random.randint(0, len(constants.BUNNY_NAME_LIST) - 1)
         return constants.BUNNY_NAME_LIST[index]
 
     def _add_bunny(self):
-        if len(self.bunnies) >= 5:
+        if len(self.bunnies) >= constants.BUNNY_MAX_NUM:
             return
-        self.bunnies.append(Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), self._generate_bunny_name()))
+        self.bunnies.append(self._create_bunny(self._generate_bunny_name()))
         self._refresh_tray_menu()
     
     def _delete_bunny(self):
@@ -241,38 +220,6 @@ class World:
 
     def _on_tray_toggle_screen_analysis(self, *args):
         self.screen_analyze_enabled = not self.screen_analyze_enabled
-
-    def _on_tray_open_chat_window(self):
-        """托盘菜单：打开聊天窗口（如果已打开则激活）"""
-        if self.chat_root and self.chat_root.winfo_exists():
-            # 窗口已存在：恢复显示并置顶
-            self.chat_root.deiconify()
-            self.chat_root.lift()
-            return
-        # 不存在则启动专用线程创建
-        self.chat_window_thread = threading.Thread(
-            target=self._run_chat_window_loop, daemon=True
-        )
-        self.chat_window_thread.start()
-    
-    def _run_chat_window_loop(self):
-        """在专用线程中运行 Tkinter 主循环"""
-        root = tk.Tk()
-
-        # 绑定关闭事件：隐藏窗口而不是销毁（避免线程退出）
-        root.protocol("WM_DELETE_WINDOW", lambda: self._hide_chat_window(root))
-
-        # 创建聊天界面
-        self.chat_app = ChatWindow(root, self)
-        self.chat_root = root
-
-        root.mainloop()
-        # 用户真正关闭时才会到达这里（如果 destroy 被调用）
-        self.chat_root = None
-
-    def _hide_chat_window(self, root):
-        """隐藏聊天窗口（不销毁，保证线程安全）"""
-        root.withdraw()
 
     def _on_tray_exit(self):
         self.running = False
@@ -398,19 +345,66 @@ class World:
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
 
     def _screen_analyze_loop(self):
+        """监听前台窗口：切窗口、或长时间赖在同一个窗口时，让兔兔吐一句
+
+        不用定时轮询是因为那样吐槽和主播正在做的事对不上——事件驱动才能
+        保证每句话都对应一个真实动作。
+        """
+        last_title = None
+        title_since = time.time()
+        last_comment_at = 0.0
+
         while self.running:
+            time.sleep(constants.SCREEN_ANALYZE_POLL_INTERVAL_SECONDS)
+
+            if not self.screen_analyze_enabled:
+                last_title = None   # 关闭期间不跟踪，重新打开时重新开始
+                continue
+
             try:
-                if self.screen_analyze_enabled:
-                    comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
-                    comment = self.screen_analyzer.analyze_screen(comment_bunny)
-                    if comment:
-                        comment_bunny.set_comment(comment)
+                title = self.window_watcher.get_foreground_title()
+                now = time.time()
+                previous = last_title
+                switched = (title != previous)
+
+                if switched:
+                    last_title = title
+                    title_since = now
+
+                if switched and previous is None:
+                    continue        # 第一次只记录当前窗口，不吐槽
+
+                dwelled = (not switched
+                           and now - title_since >= constants.SCREEN_ANALYZE_DWELL_SECONDS)
+                if not switched and not dwelled:
+                    continue
+
+                if self.window_watcher.is_ignored(title):
+                    continue
+                if now - last_comment_at < constants.SCREEN_ANALYZE_COOLDOWN_SECONDS:
+                    continue
+
+                comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
+                other_windows = self.window_watcher.get_visible_titles(
+                    exclude=title,
+                    limit=constants.SCREEN_ANALYZE_OTHER_WINDOW_NUM,
+                )
+                comment = self.screen_analyzer.analyze_screen(
+                    comment_bunny,
+                    window_title=title,
+                    other_windows=other_windows,
+                    dwell_seconds=now - title_since,
+                    recent_quips=self.recent_quips,
+                )
+                if comment:
+                    comment_bunny.set_comment(comment)
+                    self.recent_quips.append(comment)
+                    self.recent_quips = self.recent_quips[-constants.SCREEN_ANALYZE_RECENT_QUIPS:]
+                    last_comment_at = time.time()
+                    # 重置停留计时，否则同一次停留会按冷却周期反复触发
+                    title_since = time.time()
             except Exception as e:
                 self.logger.error(f"分析屏幕内容失败: {e}")
-            time.sleep(random.randint(
-                constants.SCREEN_ANALYZE_TIME_INTERVAL_MIN_SECONDS,
-                constants.SCREEN_ANALYZE_TIME_INTERVAL_MAX_SECONDS
-            ))
 
     def _refresh_tray_menu_loop(self):
         while self.running:
@@ -466,8 +460,6 @@ class World:
         if self.tray_icon:
             self.tray_icon.stop()
         self.screen.fill(self.TRANSPARENT_COLOR)
-        self.model_manager.archive_chat_range(0, len(self.model_manager.chat_history))
-        # self.model_manager.quit_save_memory()
         pygame.quit()
         sys.exit()
         

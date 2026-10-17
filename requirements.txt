@@ -7,8 +7,5 @@ pystray==0.19.5
 opencv-python==4.13.0.92
 mss==10.2.0
 requests==2.33.1
-faiss-cpu==1.13.2
-tkhtmlview==0.3.2
-markdown2==2.5.5
-matplotlib==3.10.9
-pyserial==3.5
+numpy==2.4.4
+sympy==1.14.0

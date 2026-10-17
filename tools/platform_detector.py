@@ -3,45 +3,71 @@ import ctypes
 import cv2
 import numpy as np
 import mss
+import threading
 from typing import List
 import pygame.math
 import logging
 
 
 class PlatformDetector:
-    def __init__(self, min_platform_width=100, color_diff_threshold=15, 
+    def __init__(self, min_platform_width=100, color_diff_threshold=15,
                  h_dilate_width=1, min_line_height=4):
         self.min_width = min_platform_width
         self.color_diff = color_diff_threshold
         self.h_dilate_width = h_dilate_width
         self.min_line_height = min_line_height
-        self.sct = mss.mss()
+        self._sct_local = threading.local()
+        # CLAHE 对象无状态，建一次复用即可，不必每次检测都重建
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         self.logger = logging.getLogger(__name__)
-        
+
+    @property
+    def sct(self):
+        """mss 实例不是线程安全的，每个线程各自持有一个"""
+        instance = getattr(self._sct_local, "instance", None)
+        if instance is None:
+            instance = mss.mss()
+            self._sct_local.instance = instance
+        return instance
+
     def capture_screen(self, monitor_index=1) -> np.ndarray:
-        monitor = self.sct.monitors[monitor_index]
-        screenshot = self.sct.grab(monitor)
+        sct = self.sct
+        monitor = sct.monitors[monitor_index]
+        screenshot = sct.grab(monitor)
         img = np.array(screenshot)
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+    def capture_screen_gray(self, monitor_index=1) -> np.ndarray:
+        """直接抓成灰度图。
+
+        平台检测只用灰度，先转 BGR 再转灰度会白白多一次满屏转换
+        和一个约 12MB 的中间数组。灰度结果与两步转换完全一致。
+        """
+        sct = self.sct
+        screenshot = sct.grab(sct.monitors[monitor_index])
+        return cv2.cvtColor(np.array(screenshot), cv2.COLOR_BGRA2GRAY)
     
     def detect_platforms(self, image: np.ndarray, top_n: int = 5) -> List[Platform]:
-        """返回 Platform 对象列表"""
+        """返回 Platform 对象列表。image 可以是 BGR 三通道，也可以已是灰度图"""
         h, w = image.shape[:2]
-        
-        # 1. 灰度化
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
+
+        # 1. 灰度化（已经是灰度图就跳过）
+        gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
         # 2. CLAHE 对比度增强
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
+        enhanced = self._clahe.apply(gray)
+
         # 3. 水平边缘检测
-        scharr_y = cv2.Scharr(enhanced, cv2.CV_64F, 0, 1)
-        scharr_y = np.abs(scharr_y)
-        sobel_y = cv2.Sobel(enhanced, cv2.CV_64F, 0, 1, ksize=3)
-        sobel_y = np.abs(sobel_y)
-        combined = np.maximum(scharr_y, sobel_y)
-        combined = np.uint8(combined * 255 / combined.max())
+        #    用 CV_32F 而不是 CV_64F：梯度取完绝对值马上就压到 0-255，
+        #    双精度在这里一点用没有，只是让每个中间数组翻倍
+        #    （2560x1600 下 float64 一张就是 32MB，这段占原实现近一半耗时）。
+        #    实测换成 float32 后输出逐像素一致。
+        scharr_y = np.abs(cv2.Scharr(enhanced, cv2.CV_32F, 0, 1))
+        sobel_y = np.abs(cv2.Sobel(enhanced, cv2.CV_32F, 0, 1, ksize=3))
+        # 原地合并 + 原地缩放，省掉两个满屏临时数组
+        np.maximum(scharr_y, sobel_y, out=scharr_y)
+        scharr_y *= 255.0 / scharr_y.max()
+        combined = scharr_y.astype(np.uint8)
         
         # 4. 自适应二值化
         binary = cv2.adaptiveThreshold(
@@ -62,7 +88,11 @@ class PlatformDetector:
         h_dilated = cv2.dilate(v_dilated, h_kernel, iterations=1)
         
         # 8. 行投影
-        row_sums = np.sum(h_dilated > 0, axis=1)
+        #    腐蚀+膨胀后像素非 0 即 255，所以按行求和再除以 255 就是非零像素计数。
+        #    cv2.reduce 比 np.sum(h_dilated > 0, axis=1) 快一个数量级，
+        #    而且不会为那个 > 0 的布尔判断多分配一张满屏数组。
+        #    注意 OpenCV 的 dim 与 numpy 的 axis 相反：dim=1 才是按行求和。
+        row_sums = cv2.reduce(h_dilated, 1, cv2.REDUCE_SUM, dtype=cv2.CV_32S).flatten() // 255
         
         # 9. 找连续区域
         platforms_raw = []
@@ -157,8 +187,8 @@ class PlatformDetector:
     
     def get_platforms_for_bunny(self, top_n: int = 5) -> List[Platform]:
         """截图并返回 Platform 对象列表"""
-        img = self.capture_screen()
-        return self.detect_platforms(img, top_n=top_n)
+        gray = self.capture_screen_gray()
+        return self.detect_platforms(gray, top_n=top_n)
     
     def test_visualize(self, save_prefix="test"):
         """测试可视化"""

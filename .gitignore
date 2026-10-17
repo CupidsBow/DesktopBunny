@@ -1,0 +1,30 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+env/
+
+# --- 打包产物 ---
+build/
+dist/
+*.spec
+
+# --- 日志 ---
+*.log
+
+# --- 本地密钥 ---
+# constants.py 里 SILICONFLOW_API_KEY 默认是占位符，
+# 真实 key 请放在本地文件或环境变量里，别提交上来
+.env
+
+# --- 编辑器 / 系统 ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -15,6 +15,8 @@ PLATFORM_HEIGHT = 100
 PLATFORM_DETECT_TIME_INTERVAL_SECONDS = 2
 BUNNY_MAX_NUM = 5
 PLATFORM_MAX_NUM = 10
+# 工作区尺寸变化轮询间隔：分辨率/任务栏变化后按正常流程退出重启
+SCREEN_CHANGE_POLL_INTERVAL_SECONDS = 2
 # --- 读屏幕吐槽 ---
 SCREEN_ANALYZE_MODEL = "zai-org/GLM-4.5V"
 # 关掉思考链。实测 GLM-4.5V 从 4.5 秒降到 1.0 秒，而且开着 thinking 时

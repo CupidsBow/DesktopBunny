@@ -97,6 +97,8 @@ class World:
         self.refresh_tray_menu_thread.start()
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
         self.auto_save_thread.start()
+        self.screen_change_thread = threading.Thread(target=self._watch_screen_change_loop, daemon=True)
+        self.screen_change_thread.start()
 
     def register_tools(self):
         if self.tool_executor is None:
@@ -415,6 +417,15 @@ class World:
         while self.running:
             self.save_bunny_info()
             time.sleep(60)
+
+    def _watch_screen_change_loop(self):
+        """轮询工作区尺寸，变化则按正常流程退出（分辨率/任务栏变化后需重启应用）"""
+        while self.running:
+            if self.get_physical_work_area() != self.window_size:
+                self.logger.info("检测到工作区尺寸变化，按正常流程退出")
+                self._on_tray_exit()
+                return
+            time.sleep(constants.SCREEN_CHANGE_POLL_INTERVAL_SECONDS)
 
     def save_bunny_info(self):
         data = {}

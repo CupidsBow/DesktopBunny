@@ -40,7 +40,7 @@ class World:
         self.bunnies = []
         self.tray_icon = None
         self.tray_thread = None
-        self.detect_platforms_enabled = False
+        self.detect_platforms_enabled = True
 
         self.detector = PlatformDetector()
         self.tool_executor = ToolExecutor()

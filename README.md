@@ -7,38 +7,30 @@
 ## Feature
 
 - 在底部任务栏随机游走
-- 检测屏幕上可以支撑的平台并跳上去
+- 检测屏幕上可以支撑的平台并跳上去（可在托盘菜单开关）
 - 点击静止状态的 Bunny 使其跳跃
-- 读取屏幕内容并吐槽（需要连接云端模型）
-- 添加/移除兔兔（1-5只）
+- 添加/移除兔兔（1-5只，托盘菜单）
 - 点击下蹲状态的 Bunny 可以使其变成兔娘（需要 50 以上饱食度）
-- 加了饱食度（0 - 100）每 216 秒减少一点，可以拖动文件至 Bunny 来喂食恢复 Bunny 的饱食度（会销毁文件，不进入回收站）
-- 支持与 Bunny 交互并下达指令（需要连接云端模型），保存长期记忆（需要连接本地 Ollama bge-m3），记忆文件存储在本地
-- 目前调用模型是写死的
+- 饱食度（0 - 100）每 216 秒减少一点，拖动文件至 Bunny 可喂食恢复饱食度（会销毁文件，不进入回收站）
+- 屏幕分辨率 / 工作区尺寸变化时自动退出，重启后适配新尺寸
 
 ## Quick Start
 
-### 替换 api_key
-
-目前云端模型通过 silicon 调用，需要修改 tools/constants.py 下的 SILICONFLOW_API_KEY 为自己的 api_key
-
-### 安装 Ollama 模型
-
-```bash
-ollama pull bge-m3
-```
-
-### 安装 Python 3.13.13 & 依赖 & 打包
+### 安装 Python 3.13.13 & 依赖
 
 ```bash
 pip install -r requirements.txt
 ```
+
+### 打包
+
 ```bash
-pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" main.py
+pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data "assets\*;assets" --add-data "components\*.py;components" --add-data ".env;." main.py
 ```
 
 运行 dist 目录下的 Bunny.exe
 
-## 连接模型
+## 配置
 
-目前调用 silicon 上的 Qwen/Qwen3.5-397B-A17B 模型交互，这些配置可以在 tools/constants.py 里改，本地的 Ollama bge-m3 进行向量化存储记忆，需要补充 silicon 的 api_key 并在 Ollama 安装模型并开放接口，Bunny 会自动尝试连接
+- 存档保存在 `%LOCALAPPDATA%\Bunny\bunny_save.dat`
+- 云端模型配置放在根目录 `.env`（已加入 .gitignore，模板见 `.env.sample`），预留 `LLM_API_KEY` / `LLM_CHAT_URL` / `LLM_MODEL` 三项。打包时随 exe 一起打入，当前暂无功能使用，为后续接入模型预留

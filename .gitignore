@@ -18,7 +18,7 @@ dist/
 *.log
 
 # --- 本地密钥 ---
-# constants.py 里 SILICONFLOW_API_KEY 默认是占位符，
+# constants.py 里 LLM_API_KEY 默认是占位符，
 # 真实 key 请放在本地文件或环境变量里，别提交上来
 .env
 

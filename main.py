@@ -10,8 +10,6 @@ from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
-from tools.screen_analyzer import ScreenAnalyzer
-from tools.window_watcher import WindowWatcher
 import random
 import functools
 from manager.save_manager import SaveManager
@@ -43,13 +41,9 @@ class World:
         self.tray_icon = None
         self.tray_thread = None
         self.detect_platforms_enabled = False
-        self.screen_analyze_enabled = False
 
         self.detector = PlatformDetector()
         self.tool_executor = ToolExecutor()
-        self.screen_analyzer = ScreenAnalyzer(self.detector)
-        self.window_watcher = WindowWatcher()
-        self.recent_quips = []
         self.save_manager = SaveManager()
         self.register_tools()
 
@@ -91,8 +85,6 @@ class World:
         self._start_tray()
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
         self.platform_detect_thread.start()
-        self.screen_analyze_thread = threading.Thread(target=self._screen_analyze_loop, daemon=True)
-        self.screen_analyze_thread.start()
         self.refresh_tray_menu_thread = threading.Thread(target=self._refresh_tray_menu_loop, daemon=True)
         self.refresh_tray_menu_thread.start()
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
@@ -176,11 +168,6 @@ class World:
                 self._on_tray_toggle_platform_detection,
                 checked=lambda item: self.detect_platforms_enabled
             ),
-            pystray.MenuItem(
-                "读屏幕",
-                self._on_tray_toggle_screen_analysis,
-                checked=lambda item: self.screen_analyze_enabled
-            ),
             pystray.MenuItem("退出", self._on_tray_exit)
         ]
 
@@ -219,9 +206,6 @@ class World:
         if not self.detect_platforms_enabled:
             for bunny in self.bunnies:
                 bunny.set_platforms([self.INIT_BOTTOM_PLATFORM])
-
-    def _on_tray_toggle_screen_analysis(self, *args):
-        self.screen_analyze_enabled = not self.screen_analyze_enabled
 
     def _on_tray_exit(self):
         self.running = False
@@ -345,68 +329,6 @@ class World:
                 for bunny in self.bunnies:
                     bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
-
-    def _screen_analyze_loop(self):
-        """监听前台窗口：切窗口、或长时间赖在同一个窗口时，让兔兔吐一句
-
-        不用定时轮询是因为那样吐槽和主播正在做的事对不上——事件驱动才能
-        保证每句话都对应一个真实动作。
-        """
-        last_title = None
-        title_since = time.time()
-        last_comment_at = 0.0
-
-        while self.running:
-            time.sleep(constants.SCREEN_ANALYZE_POLL_INTERVAL_SECONDS)
-
-            if not self.screen_analyze_enabled:
-                last_title = None   # 关闭期间不跟踪，重新打开时重新开始
-                continue
-
-            try:
-                title = self.window_watcher.get_foreground_title()
-                now = time.time()
-                previous = last_title
-                switched = (title != previous)
-
-                if switched:
-                    last_title = title
-                    title_since = now
-
-                if switched and previous is None:
-                    continue        # 第一次只记录当前窗口，不吐槽
-
-                dwelled = (not switched
-                           and now - title_since >= constants.SCREEN_ANALYZE_DWELL_SECONDS)
-                if not switched and not dwelled:
-                    continue
-
-                if self.window_watcher.is_ignored(title):
-                    continue
-                if now - last_comment_at < constants.SCREEN_ANALYZE_COOLDOWN_SECONDS:
-                    continue
-
-                comment_bunny = max(self.bunnies, key=lambda b: b.current_position.y)
-                other_windows = self.window_watcher.get_visible_titles(
-                    exclude=title,
-                    limit=constants.SCREEN_ANALYZE_OTHER_WINDOW_NUM,
-                )
-                comment = self.screen_analyzer.analyze_screen(
-                    comment_bunny,
-                    window_title=title,
-                    other_windows=other_windows,
-                    dwell_seconds=now - title_since,
-                    recent_quips=self.recent_quips,
-                )
-                if comment:
-                    comment_bunny.set_comment(comment)
-                    self.recent_quips.append(comment)
-                    self.recent_quips = self.recent_quips[-constants.SCREEN_ANALYZE_RECENT_QUIPS:]
-                    last_comment_at = time.time()
-                    # 重置停留计时，否则同一次停留会按冷却周期反复触发
-                    title_since = time.time()
-            except Exception as e:
-                self.logger.error(f"分析屏幕内容失败: {e}")
 
     def _refresh_tray_menu_loop(self):
         while self.running:

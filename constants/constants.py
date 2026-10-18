@@ -1,4 +1,35 @@
 import os
+import sys
+
+
+def _load_env() -> dict:
+    """读取 .env（开发时取项目根目录，frozen 时取打包内置的 sys._MEIPASS）。
+
+    .env 不进 git，打包时通过 spec/--add-data 打进 exe，运行时从 _MEIPASS 读。
+    """
+    if getattr(sys, "frozen", False):
+        env_path = os.path.join(sys._MEIPASS, ".env")
+    else:
+        # constants.py 位于 constants/ 下，项目根目录是上一级
+        env_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+        )
+
+    values: dict = {}
+    if not os.path.exists(env_path):
+        return values
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip().strip("\"'")
+    return values
+
+
+_ENV = _load_env()
+
 
 GLOBAL_FPS = 60
 BUNNY_ICON = "assets/icon.png"
@@ -17,22 +48,9 @@ BUNNY_MAX_NUM = 5
 PLATFORM_MAX_NUM = 10
 # 工作区尺寸变化轮询间隔：分辨率/任务栏变化后按正常流程退出重启
 SCREEN_CHANGE_POLL_INTERVAL_SECONDS = 2
-# --- 读屏幕吐槽 ---
-SCREEN_ANALYZE_MODEL = "zai-org/GLM-4.5V"
-# 关掉思考链。实测 GLM-4.5V 从 4.5 秒降到 1.0 秒，而且开着 thinking 时
-# 偶尔会把 <|begin_of_box|> 这类模板控制符漏进正文，画在屏幕上很难看。
-# 注意这个参数是模型相关的：换成 Qwen3-VL-30B-A3B、Qwen3-VL-32B-Thinking
-# 等不支持它的模型会直接报 20015，那时把这里改成 None 即可。
-SCREEN_ANALYZE_ENABLE_THINKING = False
-SCREEN_ANALYZE_POLL_INTERVAL_SECONDS = 1     # 前台窗口轮询间隔
-SCREEN_ANALYZE_COOLDOWN_SECONDS = 60         # 两次吐槽最短间隔，防止来回切窗口刷屏
-SCREEN_ANALYZE_DWELL_SECONDS = 600           # 同一窗口停留超过这么久也触发一次
-SCREEN_ANALYZE_OTHER_WINDOW_NUM = 5          # 作为上下文带上几个其他窗口
-SCREEN_ANALYZE_RECENT_QUIPS = 5              # 记住最近说过几句，避免重复
-SCREEN_ANALYZE_IMAGE_MAX_SIZE = 640          # 截图长边上限（再高性价比很低，见 README）
-SCREEN_ANALYZE_JPEG_QUALITY = 40
-SCREEN_ANALYZE_TIMEOUT_SECONDS = 15          # 实测 GLM-4.5V 约 1 秒；注意超时会阻塞下面的轮询循环
+# --- 云端模型配置（.env 覆盖，后续功能会复用） ---
+LLM_MODEL = _ENV.get("LLM_MODEL", "deepseek-v4-pro")
+LLM_CHAT_URL = _ENV.get("LLM_CHAT_URL", "https://api.deepseek.com/chat/completions")
+LLM_API_KEY = _ENV.get("LLM_API_KEY", "sk-REPLACE-ME")
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
-SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
-SILICONFLOW_API_KEY="sk-wzeeyxwvuylblahkproiburdhapeaoqrwyloqjnwbpximkee"
 BUNNY_NAME_LIST = ["David", "Michael", "John", "Tom", "Jack", "Kevin", "Peter", "Paul", "Henry", "Alan", "Mark", "Tony", "Jimmy", "Jerry", "Jason", "Brian", "Eric", "Nick", "Mary", "Linda", "Lisa", "Amy", "Sarah", "Anna", "Lucy", "Lily", "Nancy", "Helen", "Jenny", "Jessie", "Rita", "Rose", "Emma", "Grace", "Cindy"]

@@ -15,9 +15,6 @@ import functools
 from bot import bridge
 from bot.qq_client import QQClient
 from manager.save_manager import SaveManager
-from tools.tool_executor import ToolExecutor
-from tools.get_local_time import get_local_time
-import sympy
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
@@ -45,9 +42,7 @@ class World:
         self.detect_platforms_enabled = True
 
         self.detector = PlatformDetector()
-        self.tool_executor = ToolExecutor()
         self.save_manager = SaveManager()
-        self.register_tools()
 
     def startup(self):
         pygame.init()
@@ -97,23 +92,6 @@ class World:
         self.qq_client = QQClient()
         self.qq_client.start()
 
-    def register_tools(self):
-        if self.tool_executor is None:
-            self.tool_executor = ToolExecutor()
-        
-        self.tool_executor.registerTool(
-            "get_local_time",
-            "一个获取当前时间的工具，返回格式为 %Y-%m-%d %H:%M:%S",
-            get_local_time
-        )
-        self.tool_executor.registerTool(
-            "calc",
-            "计算单个表达式的值并返回结果",
-            sympy.sympify
-        )
-
-        self.logger.info(f"可用工具: {self.tool_executor.getAvailableTools()}")
-    
     def _start_tray(self):
         def _run_tray():
             true_icon_path = self.ICON_PATH
@@ -406,6 +384,11 @@ class World:
         
         for bunny in self.bunnies:
             bunny.update(delta)
+
+        bridge.set_bunnies_snapshot([
+            {"name": bunny.name, "satiety": bunny.satiety}
+            for bunny in self.bunnies
+        ])
                     
     def draw(self, delta: float):
         self.screen.fill(self.TRANSPARENT_COLOR)

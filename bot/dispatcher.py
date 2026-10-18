@@ -11,6 +11,7 @@ _help = (
 
     "/echo <text>  让屏幕上的兔兔Alice说一句话\n"
     "/feed <name>  喂兔兔（+20 饱食度）\n"
+    "/status       查看所有兔兔的状态\n"
     "/help         显示本帮助"
 )
 
@@ -41,6 +42,15 @@ def handle(text: str) -> str:
             return "feed 后面要跟名字，例如：feed Alice"
         bridge.enqueue_command({"type": "feed", "name": name})
         return f"喂了 {name} 一根胡萝卜~"
+
+    if lower == "/status":
+        bunnies = bridge.get_bunnies_snapshot()
+        if not bunnies:
+            return "现在还没有兔兔哦"
+        lines = ["兔兔状态："]
+        for bunny in bunnies:
+            lines.append(f"- {bunny['name']}: 饱食度 {int(bunny['satiety'])}")
+        return "\n".join(lines)
 
     try:
         return _chat.chat(text, raise_on_error=True)

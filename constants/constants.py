@@ -52,6 +52,13 @@ SCREEN_CHANGE_POLL_INTERVAL_SECONDS = 2
 LLM_MODEL = _ENV.get("LLM_MODEL", "deepseek-v4-pro")
 LLM_CHAT_URL = _ENV.get("LLM_CHAT_URL", "https://api.deepseek.com/chat/completions")
 LLM_API_KEY = _ENV.get("LLM_API_KEY", "sk-REPLACE-ME")
+# 兔兔 Alice 的对话人设（作为 chat 的 system prompt）
+ALICE_SYSTEM_PROMPT = (
+    "你是 Alice，一只住在主人电脑桌面上的兔兔桌宠，一只小兔娘。"
+    "性格活泼可爱、温柔粘人，喜欢被主人摸摸头、喂胡萝卜。"
+    "称呼用户为“主人”，语气俏皮亲昵，可以自然地用“呀”“啦”“哦”等语气词。"
+    "回复要简短、口语化，像朋友聊天一样，不要长篇大论或堆砌列表。"
+)
 # --- QQ 机器人配置（.env 覆盖） ---
 QQ_APP_ID = _ENV.get("QQ_APP_ID", "")
 QQ_APP_SECRET = _ENV.get("QQ_APP_SECRET", "")

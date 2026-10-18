@@ -42,7 +42,7 @@ pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data 
 桌宠启动时会作为 QQ 官方机器人上线：连接官方 WebSocket 网关，只发起点对点出站连接，因此**不需要公网 IP 或内网穿透**。
 
 - 私聊发消息、或群里 @ 机器人，会调用 DeepSeek 模型回复（当前为单次、无记忆对话）
-- 模型自带工具调用，会按需自动调用 `get_local_time`（当前时间）、`calc`（数学计算）
+- 模型自带工具调用，会按需自动调用 `get_local_time`（当前时间）、`calc`（数学计算）、`execute_python`（执行 Python 代码）
 - 命令（大小写不敏感）：
   - `/help` 显示帮助
   - `/echo <文本>` 让屏幕上的兔兔说一句话

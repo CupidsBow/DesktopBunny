@@ -5,6 +5,7 @@ import sympy
 
 from constants import constants
 from tools.get_local_time import get_local_time
+from tools.python_executor import execute_python
 from tools.tool_executor import ToolExecutor
 
 MAX_TOOL_ROUNDS = 5
@@ -48,6 +49,21 @@ class ChatManager:
                 "required": ["expr"],
             },
         )
+        self.tools.registerTool(
+            "execute_python",
+            "执行一段 Python 代码并返回运行结果（标准输出/错误输出），适合复杂的数学计算、数据处理等。代码需要用 print() 输出结果，最长运行 10 秒。",
+            execute_python,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "要执行的 Python 代码，结果用 print() 输出",
+                    }
+                },
+                "required": ["code"],
+            },
+        )
 
     def chat(self, msg: str, raise_on_error: bool = False) -> str:
         """发送单条消息给模型并返回回复文本。
@@ -62,7 +78,10 @@ class ChatManager:
         Returns:
             模型回复内容；失败时按 raise_on_error 决定抛异常或返回错误信息。
         """
-        messages = [{"role": "user", "content": msg}]
+        messages = [
+            {"role": "system", "content": constants.ALICE_SYSTEM_PROMPT},
+            {"role": "user", "content": msg},
+        ]
         tools = self.tools.getToolsSchema()
         headers = {
             "Authorization": f"Bearer {constants.LLM_API_KEY}",

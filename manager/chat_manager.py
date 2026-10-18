@@ -51,7 +51,7 @@ class ChatManager:
         )
         self.tools.registerTool(
             "execute_python",
-            "执行一段 Python 代码并返回运行结果（标准输出/错误输出），适合复杂的数学计算、数据处理等。代码需要用 print() 输出结果，最长运行 10 秒。",
+            "执行一段 Python 代码并返回运行结果（标准输出/错误输出），适合复杂的逻辑处理、联网信息检索等，如果没有其他工具能满足需求，可使用此工具。代码需要用 print() 输出结果，最长运行 10 秒。",
             execute_python,
             parameters={
                 "type": "object",

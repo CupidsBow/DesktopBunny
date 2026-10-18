@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 import mss
 import threading
-from typing import List
 import pygame.math
 import logging
 
@@ -47,7 +46,7 @@ class PlatformDetector:
         screenshot = sct.grab(sct.monitors[monitor_index])
         return cv2.cvtColor(np.array(screenshot), cv2.COLOR_BGRA2GRAY)
     
-    def detect_platforms(self, image: np.ndarray, top_n: int = 5) -> List[Platform]:
+    def detect_platforms(self, image: np.ndarray, top_n: int = 5) -> list[Platform]:
         """返回 Platform 对象列表。image 可以是 BGR 三通道，也可以已是灰度图"""
         h, w = image.shape[:2]
 
@@ -185,7 +184,7 @@ class PlatformDetector:
         platforms.sort(key=lambda r: abs(r[1] - screen_center_y))
         return platforms[:top_n]
     
-    def get_platforms_for_bunny(self, top_n: int = 5) -> List[Platform]:
+    def get_platforms_for_bunny(self, top_n: int = 5) -> list[Platform]:
         """截图并返回 Platform 对象列表"""
         gray = self.capture_screen_gray()
         return self.detect_platforms(gray, top_n=top_n)

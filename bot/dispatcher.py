@@ -1,0 +1,49 @@
+import logging
+
+from bot import bridge
+from manager.chat_manager import ChatError, ChatManager
+
+logger = logging.getLogger(__name__)
+
+_help = (
+    "你好呀，我是Alice，一起来聊天呀\n"
+    "可用命令：\n"
+
+    "/echo <text>  让屏幕上的兔兔Alice说一句话\n"
+    "/feed <name>  喂兔兔（+20 饱食度）\n"
+    "/help         显示本帮助"
+)
+
+_chat = ChatManager()
+
+
+def handle(text: str) -> str:
+    """处理一条 QQ 消息文本，返回要回复给用户的内容。"""
+    text = text.strip()
+    if not text:
+        return ""
+
+    lower = text.lower()
+
+    if lower == "/help":
+        return _help
+
+    if lower.startswith("/echo "):
+        content = text[6:].strip()
+        if not content:
+            return "echo 后面要跟内容，例如：echo 你好"
+        bridge.enqueue_command({"type": "echo", "text": content})
+        return f"已让兔兔说：{content}"
+
+    if lower.startswith("/feed "):
+        name = text[6:].strip()
+        if not name:
+            return "feed 后面要跟名字，例如：feed Alice"
+        bridge.enqueue_command({"type": "feed", "name": name})
+        return f"喂了 {name} 一根胡萝卜~"
+
+    try:
+        return _chat.chat(text, raise_on_error=True)
+    except ChatError as e:
+        logger.error(f"调用模型失败: {e}")
+        return f"（调用模型失败）{e}"

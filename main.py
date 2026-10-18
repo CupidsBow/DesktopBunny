@@ -12,6 +12,8 @@ from constants import constants
 from tools.platform_detector import PlatformDetector
 import random
 import functools
+from bot import bridge
+from bot.qq_client import QQClient
 from manager.save_manager import SaveManager
 from tools.tool_executor import ToolExecutor
 from tools.get_local_time import get_local_time
@@ -91,6 +93,9 @@ class World:
         self.auto_save_thread.start()
         self.screen_change_thread = threading.Thread(target=self._watch_screen_change_loop, daemon=True)
         self.screen_change_thread.start()
+
+        self.qq_client = QQClient()
+        self.qq_client.start()
 
     def register_tools(self):
         if self.tool_executor is None:
@@ -357,7 +362,29 @@ class World:
             }
         self.save_manager.save(data)
 
+    def _handle_bot_command(self, cmd: dict):
+        """处理 QQ bot 通过 bridge 发来的兔兔动作命令。"""
+        if not self.bunnies:
+            return
+        
+        ctype = cmd.get("type")
+        if ctype == "echo":
+            self.bunnies[0].set_comment(cmd.get("text", ""))
+        elif ctype == "feed":
+            bunny_name = cmd.get("name", "")
+            for bunny in self.bunnies:
+                if bunny.name == bunny_name:
+                    bunny.satiety = min(bunny.satiety + 20, 100)
+                    bunny.set_comment("嗷呜~好甜的萝卜呀~")
+                    break
+            else:
+                self.logger.warning(f"未找到名为 {bunny_name} 的兔兔")
+            
+
     def update(self, delta: float):
+        for cmd in bridge.poll_commands():
+            self._handle_bot_command(cmd)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False

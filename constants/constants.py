@@ -52,5 +52,13 @@ SCREEN_CHANGE_POLL_INTERVAL_SECONDS = 2
 LLM_MODEL = _ENV.get("LLM_MODEL", "deepseek-v4-pro")
 LLM_CHAT_URL = _ENV.get("LLM_CHAT_URL", "https://api.deepseek.com/chat/completions")
 LLM_API_KEY = _ENV.get("LLM_API_KEY", "sk-REPLACE-ME")
+# --- QQ 机器人配置（.env 覆盖） ---
+QQ_APP_ID = _ENV.get("QQ_APP_ID", "")
+QQ_APP_SECRET = _ENV.get("QQ_APP_SECRET", "")
+QQ_IS_SANDBOX = _ENV.get("QQ_IS_SANDBOX", "false").lower() == "true"
+# 订阅事件位掩码：1<<25 = 群@消息 + 单聊消息（若鉴权被拒，按控制台「订阅事件」调整）
+QQ_INTENTS = int(_ENV.get("QQ_INTENTS", str(1 << 25)))
+# 并发处理 QQ 消息的 worker 线程数
+QQ_WORKER_COUNT = int(_ENV.get("QQ_WORKER_COUNT", "8"))
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
 BUNNY_NAME_LIST = ["David", "Michael", "John", "Tom", "Jack", "Kevin", "Peter", "Paul", "Henry", "Alan", "Mark", "Tony", "Jimmy", "Jerry", "Jason", "Brian", "Eric", "Nick", "Mary", "Linda", "Lisa", "Amy", "Sarah", "Anna", "Lucy", "Lily", "Nancy", "Helen", "Jenny", "Jessie", "Rita", "Rose", "Emma", "Grace", "Cindy"]

@@ -199,34 +199,38 @@ class QQClient:
 
     def _handle_message(self, kind, target_id, msg_id, content):
         """在 worker 线程里执行：分发给 dispatcher，拿到回复后发回。"""
-        reply = dispatcher.handle(content)
+        reply, msg_type = dispatcher.handle(content)
         if not reply:
             return
         if kind == "c2c":
-            self.send_c2c_message(target_id, msg_id, reply)
+            self.send_c2c_message(target_id, msg_id, reply, msg_type)
         else:
-            self.send_group_message(target_id, msg_id, reply)
+            self.send_group_message(target_id, msg_id, reply, msg_type)
 
     # ---- 发消息（REST） ----
-    def send_c2c_message(self, user_openid, msg_id, content):
-        self._send_with_fallback(f"/v2/users/{user_openid}/messages", content, msg_id)
+    def send_c2c_message(self, user_openid, msg_id, content, msg_type=0):
+        self._send_with_fallback(f"/v2/users/{user_openid}/messages", content, msg_type, msg_id)
 
-    def send_group_message(self, group_openid, msg_id, content):
-        self._send_with_fallback(f"/v2/groups/{group_openid}/messages", content, msg_id)
+    def send_group_message(self, group_openid, msg_id, content, msg_type=0):
+        self._send_with_fallback(f"/v2/groups/{group_openid}/messages", content, msg_type, msg_id)
 
-    def _send_with_fallback(self, path, content, msg_id):
+    def _send_with_fallback(self, path, content, msg_type, msg_id):
         # 1) 被动回复：带 msg_id，受回复时间窗口限制
-        if msg_id and self._post_message(path, content, msg_id=msg_id):
+        if msg_id and self._post_message(path, content, msg_type, msg_id=msg_id):
             return
         # 2) 主动回复兜底：不带 msg_id，不受时间窗口限制
         if msg_id:
             self.logger.warning("被动回复失败，改用主动消息发送")
-        self._post_message(path, content)
+        self._post_message(path, content, msg_type)
 
-    def _post_message(self, path, content, msg_id=None) -> bool:
+    def _post_message(self, path, content, msg_type=0, msg_id=None) -> bool:
         token = self._ensure_access_token()
         url = f"https://{_api_host()}{path}"
-        body = {"content": content, "msg_type": 0}
+        body = {"msg_type": msg_type}
+        if msg_type == 2:
+            body["markdown"] = {"content": content}
+        else:
+            body["content"] = content
         if msg_id:
             body["msg_id"] = msg_id
         try:

@@ -5,7 +5,6 @@ import sympy
 
 from constants import constants
 from tools.get_local_time import get_local_time
-from tools.python_executor import execute_python
 from tools.tool_executor import ToolExecutor
 
 MAX_TOOL_ROUNDS = 5
@@ -47,21 +46,6 @@ class ChatManager:
                     }
                 },
                 "required": ["expr"],
-            },
-        )
-        self.tools.registerTool(
-            "execute_python",
-            "执行一段 Python 代码并返回运行结果（标准输出/错误输出），适合复杂的逻辑处理、联网信息检索等，如果没有其他工具能满足需求，可使用此工具。代码需要用 print() 输出结果，最长运行 10 秒。",
-            execute_python,
-            parameters={
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "要执行的 Python 代码，结果用 print() 输出",
-                    }
-                },
-                "required": ["code"],
             },
         )
 

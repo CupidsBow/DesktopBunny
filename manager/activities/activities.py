@@ -89,6 +89,8 @@ class ActivityService:
                     f"已有进行中的活动 {current.id}（{current.kind}），"
                     "请先暂停或放弃它"
                 )
+            limit = 8 if steps_limit is None else int(steps_limit)
+            limit = max(1, min(limit, 100))
             now = self.now_fn().timestamp()
             data = dict(state or {})
             data.setdefault("progress", 0.0)
@@ -102,7 +104,7 @@ class ActivityService:
                 created_at=now,
                 updated_at=now,
                 steps_used=0,
-                steps_limit=max(1, min(int(steps_limit or 8), 100)),
+                steps_limit=limit,
                 status=ActivityStatus.ACTIVE,
                 checkpoint={"progress": float(data.get("progress", 0.0))},
                 last_result="",

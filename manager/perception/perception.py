@@ -1,0 +1,80 @@
+"""感知快照聚合：把外部世界变成一份只读的结构化数据。"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Callable
+
+from manager.perception.foreground import ForegroundTracker
+from manager.perception.presence import get_idle_seconds
+from manager.shared.config import BrainConfig
+from manager.shared.timeutil import is_night, now_local
+from manager.shared.types import BunnySnapshot, Perception
+
+logger = logging.getLogger(__name__)
+
+
+class PerceptionService:
+    """每个状态时钟聚合一次；不做重要性判断，也不处理消息内容。"""
+
+    def __init__(
+        self,
+        config: BrainConfig,
+        *,
+        idle_fn: Callable[[], float | None] | None = None,
+        foreground: ForegroundTracker | None = None,
+        now_fn: Callable[[], datetime] = now_local,
+    ) -> None:
+        self.config = config
+        self._idle_fn = idle_fn or get_idle_seconds
+        self._foreground = foreground or ForegroundTracker(
+            config.foreground_dwell_seconds
+        )
+        self._now_fn = now_fn
+        self.last: Perception | None = None
+
+    def tick(
+        self,
+        bunny_snapshot: BunnySnapshot | dict | None = None,
+        qq_connected: bool = False,
+    ) -> Perception:
+        now = self._now_fn()
+        idle_seconds = self._idle_fn()
+        if idle_seconds is None:
+            someone_present: bool | None = None
+        else:
+            someone_present = idle_seconds < self.config.presence_idle_threshold
+
+        foreground = self._foreground.tick(now)
+        snapshot = _coerce_snapshot(bunny_snapshot)
+
+        system_state: dict = {
+            "foreground_dwell": round(foreground.dwell, 1),
+        }
+        if snapshot is None:
+            system_state["bunny_snapshot"] = "missing"
+
+        perception = Perception(
+            now=now,
+            idle_seconds=None if idle_seconds is None else round(idle_seconds, 1),
+            someone_present=someone_present,
+            foreground_app=foreground.app or "unknown",
+            at_night=is_night(now),
+            qq_connected=bool(qq_connected),
+            system_state=system_state,
+        )
+        self.last = perception
+        return perception
+
+
+def _coerce_snapshot(
+    value: BunnySnapshot | dict | None,
+) -> BunnySnapshot | None:
+    if value is None:
+        return None
+    if isinstance(value, BunnySnapshot):
+        return value
+    if isinstance(value, dict) and "satiety" in value:
+        return BunnySnapshot.from_dict(value)
+    return None

@@ -3,17 +3,18 @@ import pygame
 import sys
 import ctypes
 import os
+import queue
 import threading
 import time
 from components.bunny import Bunny
+from components.single_instance import SingleInstance
 from PIL import Image
 import pystray
 from constants import constants
 from tools.platform_detector import PlatformDetector
-import random
-import functools
 from bot import bridge
 from bot.qq_client import QQClient
+from manager.brain import Brain
 from manager.save_manager import SaveManager
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -36,10 +37,16 @@ class World:
         self.window_size = (0, 0)
         self.last_frame_time = 0
         self.delta = 0.0
-        self.bunnies = []
+        self.bunny = None
+        self.brain = None
+        self.qq_client = None
+        # 认知线程请求进食 → 主线程消费，饱食度仍由 bunny 权威维护
+        self._eat_requests: queue.Queue[str] = queue.Queue()
         self.tray_icon = None
         self.tray_thread = None
         self.detect_platforms_enabled = True
+        # 单实例闸门：存活到进程结束，防止出现第二个 Bunny（含 LLM 借 sandbox 自启动）
+        self._instance_guard: SingleInstance | None = None
 
         self.detector = PlatformDetector()
         self.save_manager = SaveManager()
@@ -72,13 +79,8 @@ class World:
 
         self.running = True
 
-        bunny_data = self.save_manager.load()
-        if bunny_data == {}:
-            self.bunnies.append(self._create_bunny("Alice"))
-        else:
-            for name, data in bunny_data.items():
-                self.bunnies.append(self._create_bunny(name, data.get("satiety")))
-        
+        self.bunny = self._create_bunny(self._load_satiety())
+
         self._start_tray()
         self.platform_detect_thread = threading.Thread(target=self._update_platforms_loop, daemon=True)
         self.platform_detect_thread.start()
@@ -89,7 +91,17 @@ class World:
         self.screen_change_thread = threading.Thread(target=self._watch_screen_change_loop, daemon=True)
         self.screen_change_thread.start()
 
+        bridge.set_bunny_snapshot({"satiety": self.bunny.satiety})
+
         self.qq_client = QQClient()
+        self.brain = Brain(
+            transport=self.qq_client,
+            snapshot_getter=bridge.get_bunny_snapshot,
+            eat_handler=self._request_eat,
+            qq_connected_getter=lambda: self.qq_client.is_connected,
+        )
+        self.brain.start()
+        self.qq_client.set_brain(self.brain)
         self.qq_client.start()
 
     def _start_tray(self):
@@ -117,9 +129,9 @@ class World:
         self.tray_thread = threading.Thread(target=_run_tray, daemon=True)
         self.tray_thread.start()
     
-    def _on_tray_interact_bunny(self, icon, item, idx):
-        if 0 <= idx < len(self.bunnies):
-            self.bunnies[idx].set_comment(f"主人，{self.bunnies[idx].name}在这哦~")
+    def _on_tray_interact_bunny(self, icon, item):
+        if self.bunny:
+            self.bunny.set_comment(f"主人，{constants.ALICE_NAME}在这哦~")
 
     def _refresh_tray_menu(self):
         if not self.tray_icon:
@@ -128,24 +140,15 @@ class World:
         self.tray_icon.update_menu()
 
     def _build_menu(self):
-        # ① 每只兔子的按钮
-        bunny_items = []
-        for i, bunny in enumerate(self.bunnies):
-            # 用 partial 固定 idx，生成 (icon, item, idx=i) 的回调
-            action = functools.partial(self._on_tray_interact_bunny, idx=i)
-            bunny_items.append(
-                pystray.MenuItem(
-                    # 文本仍然用 lambda 动态显示饱食度（这个可以继续用 lambda）
-                    lambda item, idx=i, name = bunny.name: f"🐰{name}: 饱食度 {int(self.bunnies[idx].satiety)}",
-                    action              # ← 这里换成 partial
-                )
+        bunny_items = [
+            pystray.MenuItem(
+                lambda item: f"🐰{constants.ALICE_NAME}: 饱食度 {int(self.bunny.satiety)}",
+                self._on_tray_interact_bunny,
             )
+        ]
 
-        # ② 固定菜单项（不变）
         control_items = [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("添加一只兔兔", self._add_bunny),
-            pystray.MenuItem("移除一只兔兔", self._delete_bunny),
             pystray.MenuItem(
                 "平台检测",
                 self._on_tray_toggle_platform_detection,
@@ -156,39 +159,34 @@ class World:
 
         return pystray.Menu(*(bunny_items + control_items))
 
-    def _create_bunny(self, name: str, satiety=None) -> Bunny:
-        """创建一只兔兔并让它进入 Idle 状态。
+    def _load_satiety(self):
+        """读取 Alice 的饱食度，兼容旧的 {name: {"satiety": ...}} 存档。"""
+        data = self.save_manager.load()
+        if not isinstance(data, dict) or not data:
+            return None
+        if "satiety" in data:
+            return data.get("satiety")
+        first = next(iter(data.values()), None)
+        if isinstance(first, dict):
+            return first.get("satiety")
+        return None
+
+    def _create_bunny(self, satiety=None) -> Bunny:
+        """创建 Alice 的身体并让它进入 Idle 状态。
 
         startup() 不能省：它才会播 Idle 动画并把 idle_timer 设成随机的 5~15 秒。
         少了它兔子会定格在第 0 帧，而且 idle_timer 还是 0，开局第一帧就起跳。
         """
-        bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]), name)
+        bunny = Bunny(pygame.math.Vector2(self.window_size[0], self.window_size[1]))
         if satiety is not None:
             bunny.satiety = satiety
         bunny.startup()
         return bunny
 
-    def _generate_bunny_name(self):
-        index = random.randint(0, len(constants.BUNNY_NAME_LIST) - 1)
-        return constants.BUNNY_NAME_LIST[index]
-
-    def _add_bunny(self):
-        if len(self.bunnies) >= constants.BUNNY_MAX_NUM:
-            return
-        self.bunnies.append(self._create_bunny(self._generate_bunny_name()))
-        self._refresh_tray_menu()
-    
-    def _delete_bunny(self):
-        if len(self.bunnies) <= 1:
-            return
-        self.bunnies.pop()
-        self._refresh_tray_menu()
-
     def _on_tray_toggle_platform_detection(self, *args):
         self.detect_platforms_enabled = not self.detect_platforms_enabled
-        if not self.detect_platforms_enabled:
-            for bunny in self.bunnies:
-                bunny.set_platforms([self.INIT_BOTTOM_PLATFORM])
+        if not self.detect_platforms_enabled and self.bunny:
+            self.bunny.set_platforms([self.INIT_BOTTOM_PLATFORM])
 
     def _on_tray_exit(self):
         self.running = False
@@ -307,10 +305,9 @@ class World:
     
     def _update_platforms_loop(self):
         while self.running:
-            if self.detect_platforms_enabled:
+            if self.detect_platforms_enabled and self.bunny:
                 platforms = self.detector.get_platforms_for_bunny(top_n=constants.PLATFORM_MAX_NUM)
-                for bunny in self.bunnies:
-                    bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
+                self.bunny.set_platforms([self.INIT_BOTTOM_PLATFORM] + platforms)
             time.sleep(constants.PLATFORM_DETECT_TIME_INTERVAL_SECONDS)
 
     def _refresh_tray_menu_loop(self):
@@ -333,36 +330,25 @@ class World:
             time.sleep(constants.SCREEN_CHANGE_POLL_INTERVAL_SECONDS)
 
     def save_bunny_info(self):
-        data = {}
-        for bunny in self.bunnies:
-            data[bunny.name] = {
-                "satiety": bunny.satiety
-            }
-        self.save_manager.save(data)
+        if self.bunny:
+            self.save_manager.save({"satiety": self.bunny.satiety})
 
-    def _handle_bot_command(self, cmd: dict):
-        """处理 QQ bot 通过 bridge 发来的兔兔动作命令。"""
-        if not self.bunnies:
-            return
-        
-        ctype = cmd.get("type")
-        if ctype == "echo":
-            self.bunnies[0].set_comment(cmd.get("text", ""))
-        elif ctype == "feed":
-            bunny_name = cmd.get("name", "")
-            for bunny in self.bunnies:
-                if bunny.name == bunny_name:
-                    bunny.satiety = min(bunny.satiety + 20, 100)
-                    bunny.set_comment("嗷呜~好甜的萝卜呀~")
-                    break
-            else:
-                self.logger.warning(f"未找到名为 {bunny_name} 的兔兔")
-            
+    def _request_eat(self, food: str = "") -> bool:
+        """认知线程调用：把进食请求排队，等主线程下一帧执行。"""
+        if not self.bunny or not self.running:
+            return False
+        self._eat_requests.put(food or "胡萝卜")
+        return True
+
+    def _apply_eat_requests(self):
+        while True:
+            try:
+                food = self._eat_requests.get_nowait()
+            except queue.Empty:
+                return
+            self.bunny.eat(food)
 
     def update(self, delta: float):
-        for cmd in bridge.poll_commands():
-            self._handle_bot_command(cmd)
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
@@ -370,43 +356,53 @@ class World:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    for i in range(len(self.bunnies)-1, -1, -1):
-                        if self.bunnies[i].handle_click(event.pos):
-                            break
+                if event.button == 1 and self.bunny:
+                    self.bunny.handle_click(event.pos)
             elif event.type == pygame.DROPFILE:
                 file_path = event.file
                 mouse_pos = pygame.mouse.get_pos()
-                for bunny in self.bunnies:
-                    if bunny.is_position_inside_bunny(mouse_pos):
-                        bunny.eat_carrot(file_path)
-                        break
-        
-        for bunny in self.bunnies:
-            bunny.update(delta)
+                if self.bunny and self.bunny.is_position_inside_bunny(mouse_pos):
+                    self.bunny.eat_carrot(file_path)
 
-        bridge.set_bunnies_snapshot([
-            {"name": bunny.name, "satiety": bunny.satiety}
-            for bunny in self.bunnies
-        ])
-                    
+        if self.bunny:
+            self._apply_eat_requests()
+            self.bunny.update(delta)
+            bridge.set_bunny_snapshot({"satiety": self.bunny.satiety})
+        if self.brain:
+            self.brain.tick(delta)
+
     def draw(self, delta: float):
         self.screen.fill(self.TRANSPARENT_COLOR)
 
-        for bunny in self.bunnies:
-            bunny.draw(delta, self.screen)
-        
+        if self.bunny:
+            self.bunny.draw(delta, self.screen)
+
         pygame.display.flip()
         
     def shutdown(self):
         self.save_bunny_info()
+        if self.qq_client:
+            self.qq_client.stop()
+        if self.brain:
+            self.brain.stop("桌面关闭")
         if self.tray_icon:
             self.tray_icon.stop()
         self.screen.fill(self.TRANSPARENT_COLOR)
         pygame.quit()
         sys.exit()
         
+    def _acquire_single_instance(self) -> bool:
+        """拿到单实例权才继续；已有实例时本进程立即退出。"""
+        guard = SingleInstance()
+        if not guard.acquire():
+            self.logger.warning("已有 Bunny 进程在运行，本实例退出")
+            return False
+        self._instance_guard = guard
+        return True
+
     def run(self):
+        if not self._acquire_single_instance():
+            return
         self.startup()
         while self.running:
             delta = self._calculate_delta()

@@ -1,7 +1,7 @@
-# 06 · 执行：聊天、多消息与身体动作
+# 06 · 执行：聊天与多消息
 
 > 执行层把 Decision 落地为输出。它不修改 Decision，也不决定说什么。
-> 它负责：怎么发、拆不拆、间隔多久、失败怎么办、身体怎么动。
+> 它负责：怎么发、拆不拆、间隔多久、失败怎么办。
 
 ---
 
@@ -9,12 +9,19 @@
 
 | 通路 | 实现 | 说明 |
 | --- | --- | --- |
-| 语言 | `qq_client.send_*` | 单聊 / 群聊，被动或主动 |
-| 身体 | `bot.bridge.enqueue_command` → pygame 主线程 | 跳、蹭、走、睡、表情 |
+| 语言 | `qq_client.send_*` | 单聊，被动或主动 |
 | 记忆 | `memory/*` | 情景写入、语义更新 |
 | 状态 | body / activities / mechanism | 需求、活动进度、事件账本 |
 
-执行层只负责前三类的"落地动作"；状态更新由各模块自己完成。
+执行层只负责语言与记忆的"落地动作"；状态更新由各模块自己完成。
+
+实现文件：
+
+| 内容 | 实现文件 |
+| --- | --- |
+| Decision → 输出的总调度 | `manager/effector/effector.py` |
+| 被动/主动发送与投递状态 | `manager/effector/chat_sender.py` |
+| 多消息拆分 | `manager/effector/message_splitter.py` |
 
 ---
 
@@ -37,7 +44,6 @@
 ### 2.2 会话类型
 
 - **c2c**：`user_openid`。
-- **group**：`group_openid`；发送时 @ 或直接回复取决于网关能力。
 - 发送目标以 Decision 的 `target.conversation_id` 为准。
 
 ### 2.3 消息类型
@@ -74,102 +80,71 @@
 - 所有分片属于**同一个回合**，不回灌收件箱，不触发新的认知帧。
 - 发送顺序严格按拆分顺序。
 
-### 3.4 打断
-
-发送过程中收到新消息：
-
-- **不打断当前发送**，消息进入收件箱。
-- 检测到明确打断信号（"停 / 别发了 / 听我说 / 不对"）：
-  - 丢弃尚未发送的分片；
-  - 把已发内容写进下一帧情境；
-  - 继续发送已生成但未发的部分由 LLM 在下一帧决定。
-- 没有打断信号：发完剩余分片，再处理新消息。
-
-### 3.5 流式（可选）
+### 3.4 流式（可选）
 
 - 长回复可以边说边发：第一句先送出，后续继续生成。
 - 流式发送的分片仍然属于同一回合。
-- 被打断时保留已发送内容，未发送部分进入下一帧情境。
+- 发送过程不支持打断；期间收到的新消息只进收件箱，发完再处理。
 
 ---
 
-## 4. 身体动作
+## 4. 记忆写回
 
-### 4.1 bridge 命令
-
-```python
-{"type": "gesture", "name": "Alice", "gesture": "hop"}
-{"type": "expression", "name": "Alice", "emotion": "开心"}
-{"type": "sleep", "name": "Alice"}
-{"type": "wake", "name": "Alice"}
-{"type": "walk_to", "name": "Alice", "x": 0.8}
-{"type": "comment", "name": "Alice", "text": "咕…"}
-```
-
-### 4.2 执行方式
-
-- 执行层把命令放入 `bridge` 队列。
-- pygame 主线程每帧消费，调用 `components/bunny.py` 的动作。
-- 多只兔兔时按 `name` 路由；Alice 默认是主实例。
-
-### 4.3 身体与语言的关系
-
-- Decision 可以同时包含 `content` 与 `body`：边说边做。
-- 也可以只有 `body`：不说话，只做动作。
-- 身体动作失败不应阻塞消息发送；记录日志即可。
-
----
-
-## 5. 记忆写回
-
-- Decision 的 `remember` 字段 → 写一条 L2 情景（由记忆模块提供接口）。
-- `tool.call(memory.write)` → 更新 L3 语义文件。
-- 执行层只调用接口，不决定内容与去重策略。
+- Decision 的 `remember` 字段（`text` + `valence`/`emotion`/`arousal`）→ 提交一条 L2 情景给 memory worker；`speaker`/`conversation`/`time` 由机制填充。
+- `tool.call(memory.write)` → 提交 L3 语义文件更新。
+- 所有记忆写入统一进 memory worker 队列，串行落盘。
+- 执行层只提交写操作，不决定内容与去重策略。
 - 写入失败进入重试队列；不阻塞聊天发送。
 
 ---
 
-## 6. Decision 到输出的映射
+## 5. Decision 到输出的映射
 
 | Decision | 执行层动作 |
 | --- | --- |
-| `chat.reply` | 拆分 → 发送 → 可选身体动作 → 写记忆 |
-| `chat.reach_out` | 主动消息 → 可选身体动作 → 写记忆 |
-| `body.do` | 仅身体动作 |
-| `activity.start/pause/resume/abandon` | 更新活动状态；不直接发消息 |
+| `chat.reply` | 拆分 → 发送 → 写记忆 |
+| `chat.reach_out` | 主动消息 → 写记忆 |
+| `activity.start/pause/resume/complete/abandon` | 更新活动状态；`pause` 保存 `args.resume_when`；不直接发消息 |
+| `activity_update` | 更新活动进度、`last_result`、`note` |
 | `tool.call` | 交给 capability 层 |
-| `rest` | 身体进入休息；降低唤醒频率 |
-| `wait` / `idle` | 不产生输出；按 `next_wake_in` 排程 |
-| `remember` | 写 L2 |
+| `eat` | 把 `args.food` 交给桌宠主线程；饱食度仍由 `components/bunny.py` 权威更新 |
+| `rest` | 设置 `body.mode = rest`；降低唤醒频率 |
+| `idle` | 不产生输出；`next_wake_in` / `wake_when` 可选；保持当前 `mode` |
 
 执行顺序：
 
 ```
 校验 Decision
   → 写记忆（不阻塞）
-  → 发消息 / 身体动作
+  → 发消息
+  → 进食请求交给桌宠主线程
   → 更新活动与事件账本
   → 调度下一次唤醒
 ```
 
-发送失败不回滚记忆；但会在下一帧情境里标注"上一条可能未送达"。
+发送失败不回滚记忆；但会在下一帧情境的 `delivery` 里标注"上一条可能未送达"。
+
+```json
+{"ok": false, "parts_sent": 1, "detail": "被动回复超时，主动消息也失败"}
+```
+
+`DeliveryStatus` 由 `chat_sender.py` 返回，`effector.py` 保存最近一次结果，情境装配只读。
 
 ---
 
-## 7. 错误处理
+## 6. 错误处理
 
 | 情况 | 处理 |
 | --- | --- |
 | 被动回复超时 | 降级主动消息；记录 |
 | 网络失败 | 有限重试；仍失败则标注未送达 |
 | 分片部分失败 | 停止后续分片，把失败写进情境 |
-| 身体动作失败 | 记录日志，不影响消息 |
 | 记忆写入失败 | 队列重试；超过阈值告警 |
 | 目标会话无效 | 返回错误；LLM 下一帧决定 |
 
 ---
 
-## 8. 边界
+## 7. 边界
 
 - 不修改 Decision 的内容、目标或动作。
 - 不替 LLM 决定"这条要不要发"。
@@ -179,7 +154,7 @@
 
 ---
 
-## 9. 可调参数
+## 8. 可调参数
 
 | 参数 | 含义 |
 | --- | --- |
@@ -189,4 +164,3 @@
 | `PASSIVE_REPLY_TIMEOUT` | 被动回复窗口 |
 | `SEND_RETRY_LIMIT` | 发送重试次数 |
 | `STREAMING_ENABLED` | 是否启用流式发送 |
-| `INTERRUPT_KEYWORDS` | 打断信号关键词 |

@@ -49,7 +49,12 @@ class BunnyState(Enum):
     GIRL_FALLING = 7
 
 class Bunny:
-    def __init__(self, screen_size: pygame.math.Vector2, name, satiety=80):
+    """Alice 的身体：动画、移动、跳跃与饱食度权威快照。
+
+    桌面上只有这一只兔兔，因此不接收实例名；身份属于 L0，不属于身体。
+    """
+
+    def __init__(self, screen_size: pygame.math.Vector2, satiety=80):
         self.GRAVITY = pygame.math.Vector2(0.0, 200.0)
         self.JUMP_VELOCITY = -self.GRAVITY * 1.0
         self.MOVE_VELOCITY = pygame.math.Vector2(50.0, 0.0)
@@ -58,7 +63,6 @@ class Bunny:
         self.BUNNY_GIRL_ACCELERATION = self.BUNNY_GIRL_MAX_SPEED
         self.SATIETY_TIME = 216.0
 
-        self.name = name
         # 饱食度，范围 0-100，初始为 80，每 216 秒减少 1 点 刚好 6 小时从 100 减少到 0
         self.satiety = satiety
         self.satiety_timer = self.SATIETY_TIME
@@ -489,12 +493,21 @@ class Bunny:
             self.change_state(BunnyState.IDLE)
             return
 
+    def eat(self, food: str = "胡萝卜", amount: int = 20):
+        """自主进食：恢复饱食度并冒一句评论。只应由主线程调用。"""
+        amount = max(0, int(amount))
+        self.satiety = min(self.satiety + amount, 100)
+        name = (food or "东西").strip()[:40] or "东西"
+        self.set_comment(f"嗷呜~{name}好好吃~")
+        logger.info(
+            f"{constants.ALICE_NAME} 吃掉了{name}, 现在的饱食度: {self.satiety}"
+        )
+        return self.satiety
+
     def eat_carrot(self, carrot_path=None):
         if carrot_path and os.path.isfile(carrot_path):
             try:
                 os.remove(carrot_path)
-                self.satiety = min(self.satiety + 20, 100)
-                self.set_comment("嗷呜~好甜的萝卜呀~")
-                logger.info(f"{self.name} 吃掉了 {carrot_path}, 现在的饱食度: {self.satiety}")
+                self.eat("胡萝卜")
             except Exception as e:
                 logger.error(f"吃胡萝卜失败: {e}")

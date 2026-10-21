@@ -11,9 +11,22 @@
 | --- | --- |
 | 存取经历、召回相关记忆、周期巩固 | 决定何时回复、是否主动说话 |
 | 保存情感痕迹（valence/emotion/arousal） | 实时计算心情/态度（属于 [01-body](01-body.md)） |
-| 维护朋友档案与自我认知 | 参与唤醒、调度、预算 |
+| 维护朋友档案与自我认知 | 参与唤醒、调度 |
 
 记忆只被读写。任何"因为记起了 X 所以必须做 Y"的逻辑都属于认知层。
+
+实现文件：
+
+| 内容 | 实现文件 |
+| --- | --- |
+| 记忆门面与 L1 | `manager/memory/memory.py` |
+| L1 超限压缩与归档 | `manager/memory/compression.py` |
+| L2/L3 文件读写 | `manager/memory/store.py` |
+| `MEMORY.md` 索引 | `manager/memory/index.py` |
+| `memory.recall` | `manager/memory/recall.py` |
+| 巩固任务 | `manager/memory/consolidation.py` |
+| 串行写入 | `manager/memory/worker.py` |
+| 能力适配 | `manager/capabilities/memory_api.py` |
 
 ---
 
@@ -22,7 +35,7 @@
 | 层 | 内容 | 介质 | 生命周期 |
 | --- | --- | --- | --- |
 | **L0 核心** | 身份、气质、行为边界 | 代码常量 | 不变 |
-| **L1 工作记忆** | 当前情境、当前回合、最近对话、活动进度 | 内存 | 会话/活动期间 |
+| **L1 工作记忆** | 当前情境、当前回合、最近对话、活动进度 | 内存 + `state/l1.json` | 跨重启保留，启动时恢复 |
 | **L2 情景记忆** | 具体事件：谁、何时、发生了什么、感受 | 一条一文件 | 长期 |
 | **L3 语义记忆** | 蒸馏后的稳定知识：自我、朋友、偏好 | 分主题文件 | 长期 |
 
@@ -32,7 +45,7 @@ L0 是"基因"，不是人设卡。只保留三样无法从记忆推导的东西
 
 1. **身份**：我是 Alice，一只生活在电脑里的兔兔。
 2. **气质基线**：活泼、亲昵、好奇、有点粘人。
-3. **行为边界**：能用哪些能力、不能做什么、权限与安全底线。
+3. **行动范围**：她可以使用整台电脑与网络；没有预设的权限裁剪。
 
 具体喜好、说话习惯、对某人的态度，全部从 L2/L3 生长。
 
@@ -41,7 +54,12 @@ L0 是"基因"，不是人设卡。只保留三样无法从记忆推导的东西
 - 当前情境、当前回合的消息与工具结果。
 - 当前活动的目标、进度、已读内容摘要。
 - 最近若干轮对话原文。
-- 超出预算时压缩为摘要，并写入 L2；不是简单丢弃。
+- 超过 `L1_CONTEXT_MAX_CHARS` 时，把最早的一半压缩为摘要并提交 L2；不是简单丢弃。
+- 压缩是记忆整理，不产生行为 Decision；摘要可以使用 LLM，但结果只作为记忆写操作入队。
+- 摘要与最近对话写入 `state/l1.json`：`{"summary": ..., "turns": [...], "saved_at": ...}`。
+- 每次 `record_turn` 和压缩成功应用后原子写入；`Memory.stop()` 再写一次。
+- 启动时无条件读取并恢复，不按 `saved_at` 判断过期，也没有关闭时间配置。
+- 文件缺失或损坏时按空 L1 启动；行数超过 `L1_HARD_MAX_LINES` 时只保留最近的部分。
 
 ### 2.3 L2 情景记忆
 
@@ -54,24 +72,26 @@ description: u123 说自己想学编程，问 Alice 推荐什么入门语言
 metadata:
   type: episodic
   speaker: u_123
-  conversation: g_456
+  conversation: c_123
   time: 2026-10-20T21:03
   valence: 0.6
   emotion: 开心
   arousal: 0.4
 ---
-u123 在群里问想学编程，Alice 推荐了 Python，并约好下次一起看教程。
+u123 问想学编程，Alice 推荐了 Python，并约好下次一起看教程。
 ```
 
 - `speaker` 是**说话人**，`conversation` 是**会话**，两者分开。
 - `valence` 是情感痕迹，写入后不修改；`emotion`/`arousal` 用于表达与显著性。
-- 文件名/`name` 保持稳定，便于去重与更新。
+- 文件名格式：`YYYY-MM-DD-<speaker>-<slug>.md`；slug 由概述截取，冲突时追加 `-2`。
+- `name` 与文件名一致，写入后不变；`remember` 不判断内容是否重复，重复事件由巩固合并。
 
 ### 2.4 L3 语义记忆
 
 | 文件 | 内容 | 加载方式 |
 | --- | --- | --- |
 | `self.md` | 自我形象：我是谁、我在意什么、我最近在做什么 | 常驻，小 |
+| `goals.md` | 长期目标与正在推进的方向 | 常驻，小 |
 | `friends/<friend_id>.md` | 朋友档案：关系摘要、共同经历、偏好、边界 | 按需 |
 | `preferences.md` | 通用偏好、口头禅、习惯 | 常驻，小 |
 
@@ -85,6 +105,7 @@ L3 只写**稳定结论**，不写流水账。流水账属于 L2。
 memory/                         # Alice 的大脑
 ├── MEMORY.md                   # 总索引：一行一条 description
 ├── self.md                     # 自我形象（常驻）
+├── goals.md                    # 长期目标（常驻）
 ├── preferences.md              # 通用偏好（常驻）
 ├── friends/
 │   └── u_123.md                # 朋友档案（按需）
@@ -92,10 +113,10 @@ memory/                         # Alice 的大脑
     └── 2026-10-20-u123-想学编程.md
 ```
 
-预算建议：
+容量建议：
 
 - `MEMORY.md` ≤ 200 行 / 25 KB。
-- `self.md` / `preferences.md` 保持精简，超限时优先合并旧结论。
+- `self.md` / `goals.md` / `preferences.md` 保持精简，超限时优先合并旧结论。
 - 单条情景 ≤ 2 KB，正文只保留事件与感受，不复制聊天原文。
 
 ---
@@ -107,31 +128,32 @@ memory/                         # Alice 的大脑
 `MEMORY.md` 是一行条目的列表：
 
 ```markdown
-- [2026-10-20-u123-想学编程](episodes/2026-10-20-u123-想学编程.md) — u123 想学编程，推荐了 Python
-- [朋友 u_123](friends/u_123.md) — 熟络，喜欢技术话题，常在晚上出现
+- [2026-10-20-u123-想学编程](episodes/2026-10-20-u123-想学编程.md) — u123 想学编程，推荐了 Python · v=0.6 a=0.4
+- [朋友 u_123](friends/u_123.md) — 喜欢技术话题，常在晚上出现 · v=0.3 a=0.2
 ```
 
 - 一行 = 一个可召回单元。
+- 每条索引行可附带 `valence` / `arousal`，供 LLM 判断是否展开。
 - 常驻上下文，但严格限量。
 - 巩固时同步维护；失效条目归档。
 
-### 4.2 召回
+### 4.2 情境中的记忆
 
-每帧的情境里带一份**轻量召回**：
+每帧的情境里带一份**记忆索引**，不预先挑选情景：
 
-1. 扫 `MEMORY.md` 的行描述，挑最多 5 条与当前消息/活动相关的情景。
-2. 相关说话人的 `friends/<id>.md` 摘要。
-3. 常驻的 `self.md`、`preferences.md`。
-4. 高 valence/arousal 的记忆有更高的召回权重（情绪增强记忆）。
+1. `MEMORY.md` 的索引行（一行一个可召回单元）。
+2. 当前说话人的 `friends/<id>.md` 摘要。
+3. 常驻的 `self.md`、`goals.md`、`preferences.md`。
+4. 索引行里带上 `valence`/`arousal`，供 LLM 判断哪些值得展开。
 
-不做向量检索、不做全文索引；相关性由"一行 description"和 LLM 的语义匹配完成。
+**相关性由 LLM 判断，机制不挑。** 情境只呈现索引；LLM 觉得哪条相关，就用 `memory.recall(query)` 展开具体内容。不做向量检索、不做全文索引。
 
 LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判断"够不够"。
 
-### 4.3 召回偏向
+### 4.3 情绪权重参考
 
-- `salience = |valence| * (0.5 + arousal)`：情绪强度高的记忆更容易被想起。
-- 可选：心情一致偏向——心情好时更易召回正面记忆。
+- `salience = |valence| * (0.5 + arousal)` 是给 LLM 的参考值，不自动排序或过滤。
+- 可选：心情一致偏向——心情好时更易注意到正面记忆。
 - 召回结果只是输入，不改变控制流。
 
 ---
@@ -142,10 +164,16 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
 
 | 类型 | 发起 | 性质 | 频率 |
 | --- | --- | --- | --- |
-| **自动巩固** | 机制（夜间/空闲/周期） | 生理维护，不是行为决策 | 每夜或每数小时 |
-| **主动反思** | LLM 选择 `reflect` 活动 | 明确的行为 | 由 Alice 自己决定 |
+| **自动巩固** | 机制定时发起（夜间/空闲/周期） | LLM 执行的蒸馏；机制只决定何时 | 每夜或每数小时 |
+| **主动反思** | LLM 选择 `reflect` 活动 | LLM 主动执行的整理 | 由 Alice 自己决定 |
+
+两种巩固的"蒸馏判断"都由 LLM 完成；区别只在"何时跑"由谁决定——自动巩固由机制定时发起，主动反思由 Alice 自己选。
 
 ### 5.1 自动巩固做什么
+
+自动巩固是由机制定时发起的 LLM 任务：机制只决定何时跑，扫描、合并、蒸馏的判断全部由 LLM 用一个收窄的巩固 prompt 完成。
+
+它不是认知帧：与认知帧并行，不读写当前回合的 L1，不产出 Decision，只提交一批记忆写操作（新建/更新 L3、更新索引、归档），由 memory worker 串行落盘。
 
 1. 扫描近期 L2 情景，按显著性排序。
 2. 合并重复/相似事件。
@@ -163,12 +191,32 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
 - **有旧文件就更新，不重复建**。
 - 结论必须能追溯到具体 L2 事件。
 
+巩固只提交写操作，不直接落盘：
+
+```json
+{
+  "op": "create_episode | update_semantic | update_index | archive",
+  "target": "episodes/2026-10-20-u123-想学编程.md",
+  "content": "稳定结论或新情景正文",
+  "metadata": {
+    "speaker": "u_123",
+    "conversation": "c_123",
+    "time": "2026-10-20T21:03:11+08:00",
+    "valence": 0.6,
+    "emotion": "开心",
+    "arousal": 0.4
+  }
+}
+```
+
+`update_index` 通常由 memory worker 在写入 L2/L3 后自动完成；LLM 只在需要改写索引描述时显式提交。
+
 ### 5.2 主动反思做什么
 
 - 回顾一段时间内的经历，重写自我叙事。
 - 整理对某位朋友的认识。
 - 写日记/笔记，形成可召回的 L2。
-- 设定长期目标（写入 `self.md` 或独立目标文件）。
+- 设定长期目标（写入 `goals.md`）。
 
 主动反思是 LLM 的行为选择，不经过任何阈值触发。
 
@@ -191,6 +239,7 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
 - 情感痕迹写在 L2 情景上，**存了就不变**。
 - 心情与态度是派生值，见 [01-body §4](01-body.md)；不落盘。
 - 情感打分由 LLM 在写记忆时顺带完成，不额外接模型。
+- `arousal` 是这段经历的情绪强度，与身体模块的 `alertness`（生理警觉度）是两回事。
 - 时间衰减让负面经历可以恢复：记仇，但会原谅。
 
 ---
@@ -203,14 +252,14 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
 - 同一套态度公式对所有人一视同仁。
 - 亲疏来自经历的数量、强度与时间衰减。
 
-### 7.2 会话与说话人分离
+### 7.2 会话与说话人
 
 | 概念 | 字段 | 决定 |
 | --- | --- | --- |
-| 会话 `conversation` | c2c: `user_openid`；group: `group_openid` | 对话上下文、收件箱归属 |
-| 说话人 `speaker` | c2c: `user_openid`；group: `author.member_openid` | 情景来源、态度、朋友档案 |
+| 会话 `conversation` | `user_openid` | 对话上下文、收件箱归属 |
+| 说话人 `speaker` | `user_openid` | 情景来源、态度、朋友档案 |
 
-群聊里多人共享会话上下文，但每个人都有独立的关系与记忆。群消息必须解析 `member_openid`。
+单聊里会话与说话人是同一个人；字段分开保留，便于未来扩展。
 
 ### 7.3 朋友档案
 
@@ -224,7 +273,6 @@ metadata:
   type: friend
   first_seen: 2026-10-01
   last_seen: 2026-10-20
-  relation: 熟络
 ---
 ## 印象
 - 对编程感兴趣，问过两次入门路线
@@ -242,10 +290,11 @@ metadata:
 
 ### 8.1 谁来写
 
-- LLM 通过 Decision 的 `remember` 字段写一条简短情景。
+- LLM 通过 Decision 的 `remember` 字段写一条简短情景：`text` 是概述，`valence`/`emotion`/`arousal` 是情感打分。
+- `speaker` / `conversation` 由机制按本帧 `handled` 的消息所属说话人填充；纯活动帧填 `speaker: null`、`conversation: null`；`time` 用帧时间。
 - LLM 通过 `memory.write` 能力更新 L3 语义文件。
-- 自动巩固在后台更新 L3 与索引。
-- 机制只负责落盘、去重、索引维护，不判断内容价值。
+- 自动巩固在后台提交 L3 与索引的写操作。
+- 所有写入统一进 memory worker 队列，串行落盘；机制只负责落盘、去重、索引维护，不判断内容价值。
 
 ### 8.2 写什么
 
@@ -276,7 +325,7 @@ metadata:
                           └──▶ 下一次召回时，人格已经不同
 ```
 
-记忆改变的是**LLM 看到什么、如何理解**，不改变调度、阈值或预算。
+记忆改变的是**LLM 看到什么、如何理解**，不改变调度或阈值。
 
 ---
 
@@ -296,9 +345,13 @@ metadata:
 
 | 参数 | 含义 |
 | --- | --- |
-| `MEMORY_INDEX_MAX_LINES` / `MEMORY_INDEX_MAX_BYTES` | 索引预算 |
-| `RECALL_MAX_EPISODES` | 每帧最多召回条数 |
-| `SELF_MAX_BYTES` / `PREFERENCES_MAX_BYTES` | 常驻文件预算 |
+| `MEMORY_INDEX_MAX_LINES` / `MEMORY_INDEX_MAX_BYTES` | 索引体积上限 |
+| `L1_CONTEXT_MAX_CHARS` | L1 触发压缩的字符上限 |
+| `L1_SUMMARY_MAX_CHARS` | 滚动摘要的字数上限 |
+| `L1_COMPRESS_RETRY_SECONDS` | 压缩调用失败后的重试间隔 |
+| `L1_HARD_MAX_LINES` | 压缩持续失败时 L1 的硬行数上限 |
+| `RECALL_MAX_EPISODES` | `memory.recall` 单次返回上限 |
+| `SELF_MAX_BYTES` / `GOALS_MAX_BYTES` / `PREFERENCES_MAX_BYTES` | 常驻文件体积上限 |
 | `EPISODE_MAX_BYTES` | 单条情景上限 |
 | `CONSOLIDATION_INTERVAL` | 自动巩固周期 |
 | `CONSOLIDATION_SALIENCE_WEIGHT` | 情绪强度对巩固优先级的影响 |

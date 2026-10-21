@@ -16,6 +16,13 @@
 
 活动不是机制给 Alice 安排的任务，而是她可以用 `activity.start` 选择的**行为**。
 
+实现文件：
+
+| 内容 | 实现文件 |
+| --- | --- |
+| 生命周期、检查点 | `manager/activities/activities.py` |
+| `activities.json` 持久化 | `manager/activities/store.py` |
+
 ---
 
 ## 2. 活动模型
@@ -30,10 +37,11 @@ class Activity:
     created_at: float
     updated_at: float
     steps_used: int
-    steps_limit: int       # LLM 设定，机制钳制硬上限
+    steps_limit: int       # LLM 自设的计划步数；到达时触发检查点，不强制停止
     status: str            # active / paused / completed / abandoned / failed
     checkpoint: dict       # 恢复所需的最小状态
     last_result: str       # 最近一步的产出摘要
+    resume_when: list      # 暂停时约定的恢复条件；只在一段暂停里有意义
 ```
 
 - `goal` 与 `state` 由 LLM 维护；机制只做持久化。
@@ -57,7 +65,7 @@ activity.start
    ┌────────┐ ──────────────────────────┘
    │ paused │
    └───┬────┘
-       │ activity.abandon / 完成 / 失败
+       │ activity.complete / activity.abandon / 失败
        ▼
  completed / abandoned / failed
 ```
@@ -81,7 +89,16 @@ activity.start
 
 - 每个活动步骤至少是一帧；如果一步需要多次工具调用，它就是一个回合（多帧）。
 - 帧里可以调用能力；能力结果作为事件返回，触发下一帧。
-- 机制在步骤完成或检查点间隔到达时发出 `activity_checkpoint` 事件。
+- 活动帧可以带 `activity_update: {progress, last_result, note}`，由活动模块落盘。
+- `steps_used` 由机制在每次活动帧自增；达到 `steps_limit` 时发出 `activity_checkpoint`，它不是停止条件，LLM 决定继续、收尾还是放弃。
+- 机制在步骤完成或检查点间隔到达时也会发出 `activity_checkpoint` 事件：
+
+```json
+{"kind": "activity_checkpoint",
+ "payload": {"activity_id": "act_17", "kind": "explore.web",
+             "progress": 0.4, "steps_used": 3, "reason": "step_completed"}}
+```
+
 - LLM 每步自己决定：继续、换方向、暂停、放弃。
 - 步骤之间意识是自由的：新消息可以插入处理。
 
@@ -90,15 +107,54 @@ activity.start
 - `activity.pause`：保存当前 checkpoint，活动进入 `paused`。
 - `activity.resume`：恢复活动，下一帧带上 `state` 与 `last_result`。
 - 暂停不丢失已完成的工作；恢复不需要重读全部内容。
-- 机制不自动暂停/恢复；这是 LLM 的选择。
+- 机制不自动暂停；是否暂停是 LLM 的选择。
+
+#### 3.3.1 `resume_when`：暂停时约好回来的条件
+
+`activity.pause` 的 `args` 可以带 `resume_when`，语义与 `wake_when` 相同：到条件时把 Alice 叫醒。
+
+```json
+{
+  "action": "activity.pause",
+  "args": {
+    "note": "先歇一会儿，精力和人都回来再继续",
+    "resume_when": [
+      {"type": "energy_above", "args": {"value": 0.6}},
+      {"type": "presence_changed", "args": {}}
+    ]
+  },
+  "next_wake_in": 1800
+}
+```
+
+规则：
+
+- 条件保存在 `Activity.resume_when`，随 `activities.json` 落盘，跨重启保留。
+- 只在 `paused` 状态求值；活动恢复、完成或放弃后清空。
+- 多个谓词之间是 **OR**：任一满足即触发。`wake_when` 同样如此。
+- 满足时机制产生一个 `alarm` 事件（payload 带 `activity_id` 与 `source: "activity_resume"`）并唤醒，**不会自动把状态改成 `active`**；是否 `activity.resume` 仍由 LLM 决定。
+- 条件触发一次后失效；需要重新约定时在下次 `activity.pause` 里再写。
+- 阈值类条件以暂停时的取值为基线，只在之后从不满足变为满足时触发；暂停当刻已经满足的条件被忽略，避免刚暂停就被自己叫醒。`at_time` 例外，到点即触发（已过则取下一次）。
+- `next_wake_in` 与 `resume_when` 互不替代：前者是时间兜底，后者是「条件到了叫我」。
+
+谓词白名单：
+
+| 谓词 | `args` | 说明 |
+| --- | --- | --- |
+| `satiety_above` | `{"value": 0~100}` | 饱食度首次高于阈值 |
+| `energy_above` | `{"value": 0~1}` | 精力首次高于阈值 |
+| `presence_changed` | `{}` | 在场布尔值边沿 |
+| `at_time` | `{"time": "HH:MM"}` 或 ISO8601 | 到点触发 |
+
+`resume_when` 只用于 `activity.pause`；其他动作携带它会被判定为非法 Decision。
 
 ### 3.4 结束
 
 | 状态 | 触发 |
 | --- | --- |
-| `completed` | 目标达成或 LLM 判断足够 |
-| `abandoned` | LLM 主动放弃 |
-| `failed` | 连续失败、权限拒绝、预算耗尽 |
+| `completed` | `activity.complete`，或 `activity.abandon` 带 `outcome: completed` |
+| `abandoned` | `activity.abandon`（默认 `outcome: abandoned`） |
+| `failed` | 连续失败 |
 
 结束时把活动摘要写入 L2 情景记忆；有价值的结论进入 L3。
 
@@ -110,9 +166,9 @@ activity.start
 | --- | --- | --- |
 | `explore.web` | 搜索、阅读、顺着兴趣深入 | `web.search`, `web.fetch` |
 | `explore.pc` | 了解本地文件、项目、软件、目录结构 | `fs.list`, `fs.read`, `fs.search`, `pc.observe` |
-| `learn` | 围绕主题阅读、整理、做笔记 | `web.*`, `fs.*`, `memory.write` |
-| `reflect` | 回顾经历、整理记忆、写日记 | `memory.recall`, `memory.read`, `memory.write` |
-| `create` | 写文字、做小工具、画点东西 | `fs.write`, `sandbox.run`（如启用） |
+| `learn` | 围绕主题阅读、整理、做笔记 | `web.*`, `fs.*`, `artifact.read`, `memory.write` |
+| `reflect` | 回顾经历、整理记忆、写日记 | `memory.recall`, `memory.read`, `memory.write`, `artifact.read` |
+| `create` | 写文字、做小工具、画点东西 | `fs.write`, `sandbox.run` |
 
 活动类型不是封闭枚举；新增类型只需要新的 kind 与能力组合。
 
@@ -164,7 +220,7 @@ activity.start
 
 - 对方不在活跃会话中，不代表不能联系；Alice 自己判断是否合适。
 - 连续主动后没有回应，记忆会记录这种经历，影响之后的判断。
-- 机制不设"每小时最多一次"的行为规则；只有预算与权限约束。
+- 机制不设"每小时最多一次"这类行为规则；联系与否完全由 Alice 判断。
 
 ### 6.3 分享闭环
 
@@ -183,7 +239,7 @@ activity.start
 | 活动进行中收到消息 | 事件入收件箱；当前帧结束后可见 |
 | 消息需要立即处理 | LLM 选择暂停活动，先处理消息 |
 | 消息只是寒暄 | LLM 可选择继续活动，稍后统一处理 |
-| 消息是纠正/打断 | `arrived_during` 帮助理解；明确"停"由机制中止在途任务 |
+| 消息是纠正 | `arrived_during` 帮助理解；机制不支持打断，当前动作会完整执行 |
 
 活动不会因为普通消息被强制中断。是否暂停是 LLM 的决定。
 
@@ -191,24 +247,20 @@ activity.start
 
 ## 8. 持久化与恢复
 
-- 活动记录落盘（`activities.json` 或数据库）。
-- 进程重启后恢复 `active` 与 `paused` 的活动。
+- 活动记录落盘到 `activities.json`。
+- 进程重启后，`active` 恢复为 `paused`，`paused` 保持 `paused`；未触发的 `resume_when` 一并保留；机制不替 Alice 继续推进。
+- 第一帧情境标注“已恢复的活动”，由 LLM 决定 `activity.resume`、调整或放弃。
 - 重启时在途的后台任务标记为 `unknown`；LLM 决定重试还是放弃。
 - checkpoint 不保存敏感原文；只保存摘要与指针。
 
 ---
 
-## 9. 预算与边界
+## 9. 约束
 
 | 约束 | 说明 |
 | --- | --- |
-| `steps_limit` | LLM 设定，机制钳制硬上限 |
-| `MAX_ACTIVITY_SECONDS` | 单次活动硬时长 |
-| `TOKEN_BUDGET` | 活动消耗计入全局预算 |
-| 权限 | 所有能力调用受 [05-capabilities](05-capabilities.md) 约束 |
-| 同时活动数 | 建议 1 个；LLM 可以暂停旧的再开新的 |
-
-活动不能自我无限延长；想继续就通过新的帧明确选择。
+| 系统访问 | 不设权限层，见 [05-capabilities](05-capabilities.md) |
+| 同时活动数 | `MAX_CONCURRENT_ACTIVITIES = 1`；已有 `active` 时 `activity.start` 返回错误，LLM 需先暂停或放弃旧的 |
 
 ---
 
@@ -217,9 +269,7 @@ activity.start
 | 情况 | 处理 |
 | --- | --- |
 | 能力超时 | 事件返回失败；LLM 决定重试/换路/放弃 |
-| 权限拒绝 | 返回原因；LLM 换路或放弃 |
 | 连续失败 | 活动标记 `failed`，摘要写进记忆 |
-| 预算耗尽 | 活动暂停；不再自动唤醒，直到预算恢复 |
 | 结果无关 | LLM 可以调整 goal 或放弃 |
 
 ---
@@ -236,7 +286,7 @@ activity.start
 14:00  有人回到电脑前 → 抬头、跳一下，但不说话
 15:20  朋友连发三条消息 → 一次看完，按顺序理解，回复
 18:00  精力下降 → 趴下休息
-23:40  夜深 → 进入低活动，只在有消息时醒来
+23:40  夜深 → 进入休息；有消息才醒，否则最多 2 小时睁眼一次
 ```
 
 ---
@@ -244,8 +294,7 @@ activity.start
 ## 12. 边界
 
 - 活动是 LLM 的选择，不是机制的排程。
-- 活动不能绕过权限与预算。
-- 活动不能无限自我延长。
+- 活动同样受超时与取消约束。
 - 活动不直接产生消息；分享是另一个 Decision。
 - 活动失败是正常结果，不是系统错误。
 
@@ -255,9 +304,7 @@ activity.start
 
 | 参数 | 含义 |
 | --- | --- |
-| `MAX_ACTIVITY_STEPS` | 单活动步数硬上限 |
-| `MAX_ACTIVITY_SECONDS` | 单活动时长硬上限 |
-| `MAX_CONCURRENT_ACTIVITIES` | 同时活动数（建议 1） |
+| `MAX_CONCURRENT_ACTIVITIES` | 同时活动数（1） |
 | `ACTIVITY_CHECKPOINT_INTERVAL` | 检查点最小间隔 |
+| `ACTIVITY_MAX_CONSECUTIVE_FAILURES` | 连续失败多少次标记 `failed` |
 | `ACTIVITY_PERSIST_PATH` | 活动持久化路径 |
-| `SANDBOX_ENABLED` | 是否允许受限的本地执行 |

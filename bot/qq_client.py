@@ -14,7 +14,7 @@ from websocket import (
 )
 
 from constants import constants
-from bot import dispatcher
+from bot.qq_adapter import QQAdapter
 
 # QQ 网关 opcode
 OP_DISPATCH = 0
@@ -63,11 +63,15 @@ class QQClient:
     """QQ 官方机器人网关客户端（同步 websocket-client，跑在独立线程里）。
 
     连网关 -> Hello -> Identify -> 收事件；断线自动退避重连。
-    收到消息后立即丢进 worker 线程池，由 bot.dispatcher 处理，需要回复时走 REST 发回。
+    收到消息后立即丢进 worker 线程池，由 ``QQAdapter`` 转成事件交给 Brain；
+    Alice 的回复通过本类的 REST 发送方法发出。
     """
 
-    def __init__(self):
+    def __init__(self, brain=None):
         self.logger = logging.getLogger(__name__)
+        self.adapter = QQAdapter(brain)
+        self._brain = brain
+        self._connected = False
         self._running = False
         self._ws = None
         self._session_id = None
@@ -79,12 +83,25 @@ class QQClient:
         self._send_lock = threading.Lock()
         self._pool = _WorkerPool(constants.QQ_WORKER_COUNT)
 
+    def set_brain(self, brain):
+        self._brain = brain
+        self.adapter.set_brain(brain)
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
     def start(self):
         if not constants.QQ_APP_ID or not constants.QQ_APP_SECRET:
             self.logger.warning("未配置 QQ_APP_ID/SECRET，QQ bot 不启动")
             return
         self._running = True
         threading.Thread(target=self._run, daemon=True, name="qq-bot").start()
+
+    def stop(self):
+        self._running = False
+        self._connected = False
+        self._close()
 
     def _run(self):
         while self._running:
@@ -162,6 +179,7 @@ class QQClient:
                 self._ws.send(json.dumps(obj))
 
     def _close(self):
+        self._connected = False
         try:
             if self._ws:
                 self._ws.close()
@@ -175,6 +193,7 @@ class QQClient:
         d = payload.get("d") or {}
         if t == "READY":
             self._session_id = d.get("session_id")
+            self._connected = True
             self.logger.info("QQ 机器人已就绪")
         elif t == "C2C_MESSAGE_CREATE":
             self._on_c2c(d)
@@ -198,30 +217,34 @@ class QQClient:
         self._pool.submit(self._handle_message, "group", group_openid, msg_id, content)
 
     def _handle_message(self, kind, target_id, msg_id, content):
-        """在 worker 线程里执行：分发给 dispatcher，拿到回复后发回。"""
-        reply, msg_type = dispatcher.handle(content)
-        if not reply:
+        """在 worker 线程里执行：所有消息都交给 Brain。"""
+        if self._brain is None:
+            self.logger.warning("Brain 尚未就绪，消息被忽略")
             return
         if kind == "c2c":
-            self.send_c2c_message(target_id, msg_id, reply, msg_type)
+            self.adapter.submit_c2c(target_id, msg_id, content)
         else:
-            self.send_group_message(target_id, msg_id, reply, msg_type)
+            self.adapter.submit_group(target_id, msg_id, content)
 
     # ---- 发消息（REST） ----
     def send_c2c_message(self, user_openid, msg_id, content, msg_type=0):
-        self._send_with_fallback(f"/v2/users/{user_openid}/messages", content, msg_type, msg_id)
+        return self._send_with_fallback(
+            f"/v2/users/{user_openid}/messages", content, msg_type, msg_id
+        )
 
     def send_group_message(self, group_openid, msg_id, content, msg_type=0):
-        self._send_with_fallback(f"/v2/groups/{group_openid}/messages", content, msg_type, msg_id)
+        return self._send_with_fallback(
+            f"/v2/groups/{group_openid}/messages", content, msg_type, msg_id
+        )
 
-    def _send_with_fallback(self, path, content, msg_type, msg_id):
+    def _send_with_fallback(self, path, content, msg_type, msg_id) -> bool:
         # 1) 被动回复：带 msg_id，受回复时间窗口限制
         if msg_id and self._post_message(path, content, msg_type, msg_id=msg_id):
-            return
+            return True
         # 2) 主动回复兜底：不带 msg_id，不受时间窗口限制
         if msg_id:
             self.logger.warning("被动回复失败，改用主动消息发送")
-        self._post_message(path, content, msg_type)
+        return self._post_message(path, content, msg_type)
 
     def _post_message(self, path, content, msg_type=0, msg_id=None) -> bool:
         token = self._ensure_access_token()

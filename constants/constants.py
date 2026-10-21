@@ -44,19 +44,15 @@ BUNNY_GIRL_MOVE_PNG = "assets/BunnyGirlMove.png"
 JUMP_WAV_PATH = "assets/se_jump.wav"
 PLATFORM_HEIGHT = 100
 PLATFORM_DETECT_TIME_INTERVAL_SECONDS = 2
-BUNNY_MAX_NUM = 5
 PLATFORM_MAX_NUM = 10
+# 桌面上只有 Alice 一只兔兔，不存在实例名与多兔路由
+ALICE_NAME = "Alice"
 # 工作区尺寸变化轮询间隔：分辨率/任务栏变化后按正常流程退出重启
 SCREEN_CHANGE_POLL_INTERVAL_SECONDS = 2
 # --- 云端模型配置（.env 覆盖，后续功能会复用） ---
 LLM_MODEL = _ENV.get("LLM_MODEL", "deepseek-v4-pro")
 LLM_CHAT_URL = _ENV.get("LLM_CHAT_URL", "https://api.deepseek.com/chat/completions")
 LLM_API_KEY = _ENV.get("LLM_API_KEY", "sk-REPLACE-ME")
-# 兔兔 Alice 的对话人设（作为 chat 的 system prompt）
-ALICE_SYSTEM_PROMPT = (
-    "你是 Alice，一只住在主人电脑桌面上的兔兔桌宠，一只小兔娘。"
-    "性格活泼可爱、温柔粘人，喜欢被主人摸摸头、喂胡萝卜。"
-)
 # --- QQ 机器人配置（.env 覆盖） ---
 QQ_APP_ID = _ENV.get("QQ_APP_ID", "")
 QQ_APP_SECRET = _ENV.get("QQ_APP_SECRET", "")
@@ -66,4 +62,3 @@ QQ_INTENTS = int(_ENV.get("QQ_INTENTS", str(1 << 25)))
 # 并发处理 QQ 消息的 worker 线程数
 QQ_WORKER_COUNT = int(_ENV.get("QQ_WORKER_COUNT", "8"))
 DEFAULT_SAVE_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Bunny')
-BUNNY_NAME_LIST = ["David", "Michael", "John", "Tom", "Jack", "Kevin", "Peter", "Paul", "Henry", "Alan", "Mark", "Tony", "Jimmy", "Jerry", "Jason", "Brian", "Eric", "Nick", "Mary", "Linda", "Lisa", "Amy", "Sarah", "Anna", "Lucy", "Lily", "Nancy", "Helen", "Jenny", "Jessie", "Rita", "Rose", "Emma", "Grace", "Cindy"]

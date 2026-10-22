@@ -15,6 +15,7 @@ from manager.shared.types import (
     BodyState,
     BunnySnapshot,
     Perception,
+    RelationLevel,
 )
 
 
@@ -201,6 +202,38 @@ def test_attitude_and_relation_tracked_per_speaker(config):
     state = deriver.derive(base_body(), None, episodes, NOW)
     assert 'u1' in state.attitudes
     assert state.attitudes['u1'].value > 0
+
+
+def test_new_acquaintance_relation_is_capped(config):
+    deriver = SelfStateDeriver(config)
+    episodes = [make_episode('u1', 0.9, minutes_ago=1) for _ in range(5)]
+
+    without_cap = deriver.derive(base_body(), None, episodes, NOW)
+    assert without_cap.attitudes['u1'].relation is RelationLevel.INTIMATE
+
+    with_cap = deriver.derive(
+        base_body(),
+        None,
+        episodes,
+        NOW,
+        friend_first_seen={'u1': NOW.date().isoformat()},
+    )
+    assert with_cap.attitudes['u1'].relation is RelationLevel.ACQUAINTANCE
+
+
+def test_old_friend_relation_is_not_capped(config):
+    deriver = SelfStateDeriver(config)
+    episodes = [make_episode('u1', 0.9, minutes_ago=1) for _ in range(5)]
+    long_ago = (NOW - timedelta(days=7)).date().isoformat()
+
+    state = deriver.derive(
+        base_body(),
+        None,
+        episodes,
+        NOW,
+        friend_first_seen={'u1': long_ago},
+    )
+    assert state.attitudes['u1'].relation is RelationLevel.INTIMATE
 
 
 @pytest.mark.parametrize(

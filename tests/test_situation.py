@@ -29,6 +29,8 @@ class FakeMemory:
             goals_summary='# 长期目标',
             preferences_summary='# 偏好',
             about_speaker=f'about:{speaker}',
+            speaker_first_seen='2026-10-21',
+            speaker_last_seen='2026-10-21',
             index=[],
         )
 
@@ -217,3 +219,10 @@ def test_current_speaker_goes_to_memory_view():
     situation = build(builder, events=events)
     assert memory.seen_speakers == ['u2']
     assert situation['memories']['about_speaker'] == 'about:u2'
+
+
+def test_memories_surface_speaker_seen_dates():
+    builder, _ = make_builder()
+    situation = build(builder, events=[make_message_event()])
+    assert situation['memories']['speaker_first_seen'] == '2026-10-21'
+    assert situation['memories']['speaker_last_seen'] == '2026-10-21'

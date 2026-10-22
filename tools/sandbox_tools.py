@@ -24,6 +24,7 @@ def run_command(
     timeout = max(0.5, min(float(timeout or 30), 600))
     merged_env = os.environ.copy()
     merged_env["PYTHONIOENCODING"] = "utf-8"
+    merged_env["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
     for key, value in (env or {}).items():
         merged_env[str(key)] = str(value)
 
@@ -69,6 +70,7 @@ def run_python(
     timeout = max(0.5, min(float(timeout or 30), 600))
     merged_env = os.environ.copy()
     merged_env["PYTHONIOENCODING"] = "utf-8"
+    merged_env["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
     for key, value in (env or {}).items():
         merged_env[str(key)] = str(value)
 

@@ -78,3 +78,50 @@ def test_output_without_json_raises():
 def test_unbalanced_braces_raise():
     with pytest.raises(ValueError):
         extract_json('{"a": 1')
+
+
+# ---------------------------------------------------------------- DSML
+
+
+def test_dsml_invoke_named_action_becomes_decision():
+    raw = (
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="tool.call">\n'
+        '<｜｜DSML｜｜ parameter name="calls" string="false">'
+        '[{"capability": "fs.read", "args": {"path": "main.py"}}]'
+        "</｜｜DSML｜｜ parameter>\n"
+        '<｜｜DSML｜｜ parameter name="handled" string="false">'
+        '["ev_000959"]'
+        "</｜｜DSML｜｜ parameter>\n"
+        '<｜｜DSML｜｜ parameter name="next_wake_in" string="false">60'
+        "</｜｜DSML｜｜ parameter>\n"
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    assert extract_json(raw) == {
+        "action": "tool.call",
+        "calls": [{"capability": "fs.read", "args": {"path": "main.py"}}],
+        "handled": ["ev_000959"],
+        "next_wake_in": 60,
+    }
+
+
+def test_dsml_invoke_named_capability_becomes_tool_call():
+    raw = (
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="fs.read">\n'
+        '<｜｜DSML｜｜ parameter name="path" string="true">main.py</｜｜DSML｜｜ parameter>\n'
+        '<｜｜DSML｜｜ parameter name="limit" string="false">6000</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    assert extract_json(raw) == {
+        "action": "tool.call",
+        "calls": [
+            {"capability": "fs.read", "args": {"path": "main.py", "limit": 6000}}
+        ],
+    }
+
+
+def test_dsml_without_marker_is_untouched():
+    assert extract_json('{"action": "idle"}') == {"action": "idle"}

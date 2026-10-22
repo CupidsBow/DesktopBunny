@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import logging
+import os
 from datetime import datetime
 from typing import Any, Callable, Mapping
 
@@ -208,7 +210,8 @@ class CapabilityRegistry:
 
         self.add(
             "sandbox.run",
-            "运行命令或 Python 代码；会执行任意代码。慢能力。",
+            "运行命令或 Python 代码；会执行任意代码。慢能力。未指定 cwd 时在 scratch 目录运行，"
+            "临时草稿用相对路径即可，不会污染项目；改项目文件请显式传 cwd 或绝对路径。",
             {
                 **_OBJECT,
                 "properties": {
@@ -219,7 +222,9 @@ class CapabilityRegistry:
                     "timeout": {"type": "number", "minimum": 0.5, "maximum": 600},
                 },
             },
-            _sandbox_run,
+            functools.partial(
+                _sandbox_run, default_cwd=self.config.paths.scratch_dir
+            ),
             async_mode=True,
             timeout_seconds=120,
         )
@@ -318,15 +323,21 @@ def _sandbox_run(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     timeout: float = 30,
+    *,
+    default_cwd: str | None = None,
 ) -> dict[str, Any]:
     if bool(command) == bool(code):
         raise ValueError("command 与 code 必须且只能提供一个")
+    workdir = cwd or default_cwd
+    if workdir:
+        os.makedirs(workdir, exist_ok=True)
     if command:
-        result = run_command(command, cwd=cwd, env=dict(env or {}), timeout=timeout)
+        result = run_command(command, cwd=workdir, env=dict(env or {}), timeout=timeout)
         result["mode"] = "command"
     else:
-        result = run_python(code or "", cwd=cwd, env=dict(env or {}), timeout=timeout)
+        result = run_python(code or "", cwd=workdir, env=dict(env or {}), timeout=timeout)
         result["mode"] = "code"
+    result["cwd"] = workdir or os.getcwd()
     return result
 
 

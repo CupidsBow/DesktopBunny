@@ -46,6 +46,21 @@ def test_parse_rejects_non_object(parser: DecisionParser) -> None:
         parser.parse("[1, 2, 3]")
 
 
+def test_string_remember_becomes_decision_error(parser: DecisionParser) -> None:
+    with pytest.raises(DecisionError):
+        parser.parse('{"action": "idle", "remember": "随便一句话"}')
+
+
+def test_string_call_item_becomes_decision_error(parser: DecisionParser) -> None:
+    with pytest.raises(DecisionError):
+        parser.parse('{"action": "tool.call", "calls": ["fs.read"]}')
+
+
+def test_string_target_becomes_decision_error(parser: DecisionParser) -> None:
+    with pytest.raises(DecisionError):
+        parser.parse('{"action": "idle", "target": "someone"}')
+
+
 # ---------------------------------------------------------------- 校验
 
 

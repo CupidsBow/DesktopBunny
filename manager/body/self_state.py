@@ -39,10 +39,11 @@ class SelfStateDeriver:
         now: datetime,
         *,
         at_night: bool = False,
+        friend_first_seen: Mapping[str, str] | None = None,
     ) -> SelfState:
         episodes = list(episodes or [])
         mood = self._mood(episodes, now)
-        attitudes = self._attitudes(episodes, now)
+        attitudes = self._attitudes(episodes, now, friend_first_seen)
         urges = self._urges(body, attitudes, episodes, now, at_night)
         return SelfState(
             mood=round(mood, 3),
@@ -87,7 +88,10 @@ class SelfStateDeriver:
     # 态度
     # ------------------------------------------------------------------
     def _attitudes(
-        self, episodes: list[Episode], now: datetime
+        self,
+        episodes: list[Episode],
+        now: datetime,
+        friend_first_seen: Mapping[str, str] | None = None,
     ) -> dict[str, Attitude]:
         buckets: dict[str, list[tuple[float, float, float]]] = {}
         for episode in episodes:
@@ -117,13 +121,38 @@ class SelfStateDeriver:
                 continue
             value = sum(item[0] * item[1] for item in items) / total_weight
             confidence = total_weight
+            relation = self._relation(round(value, 3), confidence)
+            relation = self._cap_new_acquaintance(
+                relation, (friend_first_seen or {}).get(friend_id), now
+            )
             result[friend_id] = Attitude(
                 friend_id=friend_id,
                 value=round(max(-1.0, min(1.0, value)), 3),
                 confidence=round(confidence, 3),
-                relation=self._relation(round(value, 3), confidence),
+                relation=relation,
             )
         return result
+
+    def _cap_new_acquaintance(
+        self,
+        relation: RelationLevel,
+        first_seen: str | None,
+        now: datetime,
+    ) -> RelationLevel:
+        """刚认识的人关系最高只到 ACQUAINTANCE，不因一两句高情绪对话就熟络。"""
+        if relation not in (
+            RelationLevel.FAMILIAR,
+            RelationLevel.CLOSE,
+            RelationLevel.INTIMATE,
+        ):
+            return relation
+        seen = parse_iso(first_seen) if first_seen else None
+        if seen is None:
+            return relation
+        age = max(0.0, (now - seen).total_seconds())
+        if age < self.config.acquaintance_min_age:
+            return RelationLevel.ACQUAINTANCE
+        return relation
 
     def _relation(self, value: float, confidence: float) -> RelationLevel:
         t = self.thresholds

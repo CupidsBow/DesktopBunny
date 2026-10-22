@@ -118,6 +118,8 @@ class Mechanism:
         self._prev_perception: Perception | None = None
         self._episodes_cache: list = []
         self._episodes_at: datetime | None = None
+        self._first_seen_cache: dict[str, str] = {}
+        self._first_seen_at: datetime | None = None
         self._turn = TurnState()
         self._last_frame_at = self.now_fn()
         self._last_idle_notify = 0.0
@@ -233,6 +235,7 @@ class Mechanism:
                     episodes,
                     now,
                     at_night=perception.at_night,
+                    friend_first_seen=self._friend_first_seen(now),
                 )
                 prev_body, prev_perception = self._prev_body, self._prev_perception
                 self._body = body
@@ -271,6 +274,23 @@ class Mechanism:
         )
         self._episodes_at = now
         return self._episodes_cache
+
+    def _friend_first_seen(self, now: datetime) -> dict[str, str]:
+        """与 episodes 同节奏缓存的好友 first_seen，供关系计算使用。"""
+        if (
+            self._first_seen_at is not None
+            and (now - self._first_seen_at).total_seconds() < 60
+        ):
+            return self._first_seen_cache
+        episodes = self._episodes(now)
+        ids = {
+            episode.metadata.speaker
+            for episode in episodes
+            if episode.metadata.speaker
+        }
+        self._first_seen_cache = self.memory.first_seen_map(ids)
+        self._first_seen_at = now
+        return self._first_seen_cache
 
     def _poll_timers(self, now: datetime) -> None:
         try:
@@ -353,6 +373,8 @@ class Mechanism:
             )
         )
         if event.kind is EventKind.MESSAGE:
+            if event.source.friend_id:
+                self.memory.ensure_friend(event.source.friend_id)
             with self._lock:
                 self._pending_interactions += 1
         return event
@@ -579,10 +601,11 @@ class Mechanism:
             )
         else:
             logger.warning(
-                "能力失败 %s（%s）：%s",
+                "能力失败 %s（%s）：%s%s",
                 call.capability,
                 call.call_id or "-",
-                result.detail,
+                result.reason or "",
+                f" {result.detail}" if result.detail else "",
             )
         event = self.events.add(kind, payload=payload)
         self.wake.notify(
@@ -751,6 +774,7 @@ class Mechanism:
             self._self_state = self.self_deriver.derive(
                 body, None, self._episodes(now), now,
                 at_night=perception.at_night,
+                friend_first_seen=self._friend_first_seen(now),
             )
             self._last_state_tick = now if not initial else None
         self.clock.mark(now)

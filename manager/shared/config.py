@@ -81,6 +81,11 @@ class BrainPaths:
         return os.path.join(self.root, "artifacts")
 
     @property
+    def scratch_dir(self) -> str:
+        """沙盒默认工作目录；Alice 的临时草稿都落在这里，不污染项目根目录。"""
+        return os.path.join(self.root, "scratch")
+
+    @property
     def logs_dir(self) -> str:
         return os.path.join(self.root, "logs")
 
@@ -97,6 +102,7 @@ class BrainPaths:
             self.friends_dir,
             self.state_dir,
             self.artifacts_dir,
+            self.scratch_dir,
             self.logs_dir,
         ):
             os.makedirs(path, exist_ok=True)
@@ -189,6 +195,8 @@ class BrainConfig:
     mood_window: float = 4 * 3600.0
     mood_half_life: float = 2 * 3600.0
     attitude_half_life: float = 7 * 86400.0
+    #: 认识不满这么久（秒）的人，关系最高只到 ACQUAINTANCE，避免一见如故。
+    acquaintance_min_age: float = 24 * 3600.0
     relation_thresholds: RelationThresholds = field(
         default_factory=RelationThresholds
     )

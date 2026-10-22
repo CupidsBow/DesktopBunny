@@ -124,6 +124,8 @@ class SituationBuilder:
                 "goals": view.goals_summary,
                 "preferences": view.preferences_summary,
                 "about_speaker": view.about_speaker,
+                "speaker_first_seen": view.speaker_first_seen,
+                "speaker_last_seen": view.speaker_last_seen,
                 "index": [render_line(entry) for entry in view.index],
                 "recent_context": self.memory.recent_context(),
             },
@@ -193,12 +195,17 @@ def _delivery(delivery: DeliveryStatus | None) -> dict[str, Any]:
     return {"last_ok": delivery.ok, "detail": delivery.detail}
 
 
+def _enum_value(value: Any) -> Any:
+    """枚举取 .value，字符串等原样返回。"""
+    return value.value if hasattr(value, "value") else value
+
+
 def _event(event: Event) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": event.id,
-        "kind": event.kind.value,
+        "kind": _enum_value(event.kind),
         "at": event.at,
-        "status": event.status.value,
+        "status": _enum_value(event.status),
     }
     if event.arrived_during is not None:
         base["arrived_during"] = {

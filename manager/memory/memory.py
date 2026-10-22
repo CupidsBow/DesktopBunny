@@ -12,7 +12,7 @@ from typing import Iterable
 from manager.memory.compression import L1Compressor
 from manager.memory.index import MemoryIndex
 from manager.memory.recall import Recall
-from manager.memory.store import MemoryStore, slugify
+from manager.memory.store import MemoryStore
 from manager.memory.worker import MemoryWorker
 from manager.shared.config import BrainConfig, BrainPaths
 from manager.shared.llm_client import LLMClient
@@ -161,11 +161,14 @@ class Memory:
         index_limit: int = _INDEX_VIEW_LIMIT,
     ) -> MemoryView:
         entries = self.index.entries()[-max(1, index_limit) :]
+        profile = self.friend(about_speaker) if about_speaker else None
         return MemoryView(
             self_summary=self._read_summary(self.paths.self_path),
             goals_summary=self._read_summary(self.paths.goals_path),
             preferences_summary=self._read_summary(self.paths.preferences_path),
-            about_speaker=self._about(about_speaker),
+            about_speaker=self._about(about_speaker, profile),
+            speaker_first_seen=profile.first_seen if profile else None,
+            speaker_last_seen=profile.last_seen if profile else None,
             index=entries,
         )
 
@@ -177,16 +180,22 @@ class Memory:
             return ""
         return text.strip()[:_SUMMARY_LIMIT]
 
-    def _about(self, speaker: str | None) -> str:
+    def _about(
+        self, speaker: str | None, profile: FriendProfile | None = None
+    ) -> str:
         if not speaker:
             return ""
-        profile = self.friend(speaker)
+        profile = profile or self.friend(speaker)
         parts: list[str] = []
         if profile.impression:
             parts.append(profile.impression)
         if profile.shared_history:
             parts.append("共同经历：" + profile.shared_history)
         text = "\n".join(parts).strip()
+        if not text:
+            # 第一次接触：没有档案或档案为空时，明确告诉 Alice 这是陌生人，
+            # 避免把新人当成旧友，过于自来熟。
+            return "（第一次接触，还不了解对方。）"
         return text[:_SUMMARY_LIMIT]
 
     def friend(self, friend_id: str) -> FriendProfile:
@@ -195,6 +204,15 @@ class Memory:
         except (OSError, ValueError) as exc:
             logger.warning("读取好友档案 %s 失败：%s", friend_id, exc)
             return FriendProfile(friend_id=friend_id)
+
+    def first_seen_map(self, friend_ids: Iterable[str]) -> dict[str, str]:
+        """批量取好友的 ``first_seen``，供关系计算使用。"""
+        result: dict[str, str] = {}
+        for friend_id in friend_ids:
+            first_seen = self.friend(friend_id).first_seen
+            if first_seen:
+                result[friend_id] = first_seen
+        return result
 
     def recent_episodes(
         self,
@@ -454,23 +472,10 @@ class Memory:
     def submit(self, op: MemoryWriteOp) -> str:
         return self.worker.submit(op)
 
-    def friend_path(self, friend_id: str) -> str:
-        return f"friends/{slugify(friend_id, 64)}.md"
-
     # ------------------------------------------------------------------
     def ensure_friend(self, friend_id: str) -> str:
-        """第一次见到某个好友时留一个空档案。"""
-        target = self.friend_path(friend_id)
-        try:
-            exists = bool(self.store.read_text(target))
-        except ValueError:
-            return target
-        if not exists:
-            self.write_semantic(
-                target,
-                f"## 印象\n\n（还不了解 {friend_id}。）\n\n## 共同经历\n\n",
-            )
-        return target
+        """第一次见到某个好友时留一个空档案；之后每次见面刷新 last_seen。"""
+        return self.store.touch_friend(friend_id, self.now_fn())
 
     def episode_refs(self, episodes: Iterable[Episode]) -> list[str]:
         return [episode.path for episode in episodes if episode.path]

@@ -281,6 +281,38 @@ class MemoryStore:
         self._atomic_write(path, content)
         return relative
 
+    def touch_friend(self, friend_id: str, now: datetime | None = None) -> str:
+        """首次见面建档；之后每次见面把 ``last_seen`` 刷新到今天。"""
+        relative = f"friends/{slugify(friend_id, 64)}.md"
+        path = self.path_for(relative)
+        today = to_iso(now or now_local())[:10]
+        text = self.read_text(relative)
+        if not text:
+            self._write_friend_skeleton(path, friend_id, today)
+            return relative
+        data, body = parse_frontmatter(text)
+        metadata = data.get("metadata")
+        if not isinstance(metadata, Mapping):
+            return relative
+        if metadata.get("last_seen") == today:
+            return relative
+        metadata["first_seen"] = metadata.get("first_seen") or today
+        metadata["last_seen"] = today
+        data["metadata"] = metadata
+        self._atomic_write(path, render_frontmatter(data) + "\n" + body)
+        return relative
+
+    def _write_friend_skeleton(
+        self, path: str, friend_id: str, today: str
+    ) -> None:
+        front = {
+            "name": friend_id,
+            "description": f"（还不了解 {friend_id}。）",
+            "metadata": {"type": "friend", "first_seen": today, "last_seen": today},
+        }
+        content = f"## 印象\n\n（还不了解 {friend_id}。）\n\n## 共同经历\n\n"
+        self._atomic_write(path, render_frontmatter(front) + "\n" + content)
+
     def read_friend(self, friend_id: str) -> FriendProfile:
         relative = f"friends/{slugify(friend_id, 64)}.md"
         text = self.read_text(relative)

@@ -49,10 +49,17 @@ class MemoryWorker:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
+        """停止线程：队列里排在哨兵之前的写任务仍会执行完。"""
         self._stop.set()
         self._queue.put(_SENTINEL)
         if self._thread:
             self._thread.join(timeout)
+            if self._thread.is_alive():
+                logger.warning(
+                    "记忆线程未在 %.1fs 内退出，剩余 %s 个任务",
+                    timeout,
+                    self.pending,
+                )
 
     def submit(self, op: MemoryWriteOp) -> str:
         with self._counter_lock:
@@ -76,7 +83,9 @@ class MemoryWorker:
 
     # ------------------------------------------------------------------
     def _run(self) -> None:
-        while not self._stop.is_set():
+        # 这里不把 _stop 当作循环条件：stop() 之后，队列里排在哨兵前面的
+        # 写任务还要执行完，否则退出时最后几条记忆会静默丢失。
+        while True:
             item = self._queue.get()
             try:
                 if item is _SENTINEL:

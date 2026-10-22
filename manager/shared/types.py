@@ -952,6 +952,8 @@ class MemoryView(DataModel):
     goals_summary: str = ""
     preferences_summary: str = ""
     about_speaker: str = ""
+    speaker_first_seen: str | None = None
+    speaker_last_seen: str | None = None
     index: list[MemoryIndexEntry] = field(default_factory=list)
 
     @classmethod
@@ -961,6 +963,8 @@ class MemoryView(DataModel):
             goals_summary=str(data.get("goals_summary", "")),
             preferences_summary=str(data.get("preferences_summary", "")),
             about_speaker=str(data.get("about_speaker", "")),
+            speaker_first_seen=data.get("speaker_first_seen"),
+            speaker_last_seen=data.get("speaker_last_seen"),
             index=[
                 MemoryIndexEntry.from_dict(item)
                 for item in (data.get("index") or [])

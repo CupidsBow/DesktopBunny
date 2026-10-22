@@ -17,20 +17,10 @@ def observe(what: Iterable[str] | str | None = None) -> dict[str, Any]:
         items = [str(part) for part in what if str(part).strip()]
     result: dict[str, Any] = {}
     for item in items:
-        if item == "foreground":
-            result["foreground"] = foreground()
-        elif item == "presence":
-            result["presence"] = presence()
-        elif item == "processes":
-            result["processes"] = processes()
-        elif item == "cpu":
-            result["cpu"] = cpu()
-        elif item == "memory":
-            result["memory"] = memory()
-        elif item == "network":
-            result["network"] = network()
-        else:
-            result[item] = {"error": f"未知的观察项: {item}"}
+        handler = _OBSERVERS.get(item)
+        result[item] = (
+            _guarded(handler) if handler else {"error": f"未知的观察项: {item}"}
+        )
     return result
 
 
@@ -190,6 +180,16 @@ def _processes_tasklist() -> list[dict[str, Any]]:
         )
     items.sort(key=lambda item: item.get("memory_mb") or 0, reverse=True)
     return items[:25]
+
+
+_OBSERVERS: dict[str, Any] = {
+    "foreground": foreground,
+    "presence": presence,
+    "processes": processes,
+    "cpu": cpu,
+    "memory": memory,
+    "network": network,
+}
 
 
 __all__ = [

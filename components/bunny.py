@@ -8,7 +8,6 @@ import random
 from components.sprite import Sprite
 import sys
 from constants import constants
-from typing import List
 import logging
 
 
@@ -93,7 +92,7 @@ class Bunny:
 
         self.platforms = [Platform(pygame.math.Vector2(0, screen_size.y), pygame.math.Vector2(screen_size.x, constants.PLATFORM_HEIGHT))]
 
-    def set_platforms(self, platforms: List[Platform]):
+    def set_platforms(self, platforms: list[Platform]):
         self.platforms = platforms
 
     def set_comment(self, comment: str):
@@ -480,14 +479,10 @@ class Bunny:
             self.change_state(BunnyState.JUMP)
             return
         elif self.current_state == BunnyState.SPECIAL:
-            if self.satiety >= 50:
-                self.set_comment("嗷呜~变成人啦~")
-                self.current_position = self.current_position + pygame.math.Vector2(0.0, -50.0)
-                self.change_state(BunnyState.GIRL_IDLE)
-                return
-            else:
-                self.set_comment("哼~不喂我吃的还想让我变人~")
-                return
+            self.set_comment("嗷呜~变成人啦~")
+            self.current_position = self.current_position + pygame.math.Vector2(0.0, -50.0)
+            self.change_state(BunnyState.GIRL_IDLE)
+            return
         elif self.current_state == BunnyState.GIRL_IDLE:
             self.set_comment("嗷呜~变回兔兔啦~")
             self.change_state(BunnyState.IDLE)

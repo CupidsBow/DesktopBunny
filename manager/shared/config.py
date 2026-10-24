@@ -57,6 +57,10 @@ class BrainPaths:
         return os.path.join(self.root, "state")
 
     @property
+    def body_state_path(self) -> str:
+        return os.path.join(self.state_dir, "body.json")
+
+    @property
     def l1_path(self) -> str:
         return os.path.join(self.state_dir, "l1.json")
 
@@ -110,7 +114,7 @@ class BrainPaths:
 
 @dataclass(frozen=True)
 class RelationThresholds:
-    """连续态度 → 离散关系等级的切分。见 01-body.md §4.2。"""
+    """连续态度 → 离散关系等级的切分。见 02-body.md §3.2。"""
 
     min_confidence: float = 0.2
     distant_below: float = -0.3
@@ -163,9 +167,10 @@ class BrainConfig:
 
     # --- 机制：时钟、唤醒、帧 ---
     state_tick_interval: float = 2.0
-    settle_window: float = 1.0
-    max_idle_seconds: float = 1800.0
-    max_idle_seconds_rest: float = 7200.0
+    #: 身体状态落盘间隔（秒）；brain 在 tick 里按此节流保存 body.json。
+    body_save_interval: float = 60.0
+    #: 定期唤醒间隔：机械生物的基础心跳，也是唯一的兜底唤醒，与事件 / 闹钟 / 信号无关。
+    periodic_wake_seconds: float = 1800.0
     next_wake_max_seconds: int = 86400
     frame_timeout_seconds: float = 60.0
     wake_deadbands: dict[str, tuple[float, ...]] = field(
@@ -204,6 +209,14 @@ class BrainConfig:
         default_factory=lambda: dict(DEFAULT_URGE_RATES)
     )
     circadian_curve: tuple[tuple[float, float], ...] = DEFAULT_CIRCADIAN_CURVE
+    #: 静默时精力回满所需秒数（0→1）。
+    energy_full_recovery_seconds: float = 6 * 3600.0
+    #: 连续忙碌多久耗尽精力（1→0）。
+    energy_drain_seconds: float = 6 * 3600.0
+    #: 每次社交互动消耗的社交电量（0~1）。
+    social_cost_per_interaction: float = 0.03
+    #: 独处时社交电量回满所需秒数（0→1）。
+    social_full_recovery_seconds: float = 6 * 3600.0
 
     # --- 记忆 ---
     l1_context_max_chars: int = 12000
@@ -232,9 +245,6 @@ class BrainConfig:
     fs_max_read_bytes: int = 256 * 1024
 
     # --- 出站 ---
-    message_split_max_chars: int = 500
-    message_split_max_parts: int = 4
-    message_send_interval: float = 0.8
     passive_reply_timeout: float = 5.0
     send_retry_limit: int = 1
     streaming_enabled: bool = False

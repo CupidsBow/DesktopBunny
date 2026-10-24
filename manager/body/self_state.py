@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Iterable, Mapping
 
 from manager.shared.config import BrainConfig, RelationThresholds
-from manager.shared.timeutil import decay_factor, parse_iso
+from manager.shared.timeutil import decay_factor, is_night, parse_iso
 from manager.shared.types import (
     Attitude,
     BodyState,
@@ -37,14 +37,11 @@ class SelfStateDeriver:
         memory_view: MemoryView | None,
         episodes: Iterable[Episode],
         now: datetime,
-        *,
-        at_night: bool = False,
-        friend_first_seen: Mapping[str, str] | None = None,
     ) -> SelfState:
         episodes = list(episodes or [])
         mood = self._mood(episodes, now)
-        attitudes = self._attitudes(episodes, now, friend_first_seen)
-        urges = self._urges(body, attitudes, episodes, now, at_night)
+        attitudes = self._attitudes(episodes, now)
+        urges = self._urges(body, attitudes, episodes, now, is_night(now))
         return SelfState(
             mood=round(mood, 3),
             mood_label=self._mood_label(mood),
@@ -91,9 +88,9 @@ class SelfStateDeriver:
         self,
         episodes: list[Episode],
         now: datetime,
-        friend_first_seen: Mapping[str, str] | None = None,
     ) -> dict[str, Attitude]:
         buckets: dict[str, list[tuple[float, float, float]]] = {}
+        first_seen: dict[str, datetime] = {}
         for episode in episodes:
             speaker = episode.metadata.speaker
             if not speaker:
@@ -101,6 +98,8 @@ class SelfStateDeriver:
             when = parse_iso(episode.metadata.time)
             if when is None:
                 continue
+            if speaker not in first_seen or when < first_seen[speaker]:
+                first_seen[speaker] = when
             age = max(0.0, (now - when).total_seconds())
             weight = decay_factor(age, self.config.attitude_half_life)
             intensity = abs(episode.metadata.valence) * (
@@ -123,7 +122,7 @@ class SelfStateDeriver:
             confidence = total_weight
             relation = self._relation(round(value, 3), confidence)
             relation = self._cap_new_acquaintance(
-                relation, (friend_first_seen or {}).get(friend_id), now
+                relation, first_seen.get(friend_id), now
             )
             result[friend_id] = Attitude(
                 friend_id=friend_id,
@@ -136,7 +135,7 @@ class SelfStateDeriver:
     def _cap_new_acquaintance(
         self,
         relation: RelationLevel,
-        first_seen: str | None,
+        first_seen: datetime | None,
         now: datetime,
     ) -> RelationLevel:
         """刚认识的人关系最高只到 ACQUAINTANCE，不因一两句高情绪对话就熟络。"""
@@ -146,10 +145,9 @@ class SelfStateDeriver:
             RelationLevel.INTIMATE,
         ):
             return relation
-        seen = parse_iso(first_seen) if first_seen else None
-        if seen is None:
+        if first_seen is None:
             return relation
-        age = max(0.0, (now - seen).total_seconds())
+        age = max(0.0, (now - first_seen).total_seconds())
         if age < self.config.acquaintance_min_age:
             return RelationLevel.ACQUAINTANCE
         return relation
@@ -289,3 +287,13 @@ class SelfStateDeriver:
                     reason="最近有值得说的事",
                 )
         return None
+
+
+def derive(
+    body: BodyState,
+    memory_view: MemoryView | None,
+    episodes: Iterable[Episode],
+    now: datetime,
+) -> SelfState:
+    """body 模块的便捷入口：用默认配置派生一份 ``SelfState``。"""
+    return SelfStateDeriver(BrainConfig()).derive(body, memory_view, episodes, now)

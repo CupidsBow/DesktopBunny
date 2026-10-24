@@ -14,7 +14,6 @@ _DSML_ACTIONS = frozenset({
     "tool.call", "chat.reply", "chat.reach_out",
     "activity.start", "activity.pause", "activity.resume",
     "activity.complete", "activity.abandon",
-    "eat", "rest", "idle",
 })
 _DSML_INVOKE_RE = re.compile(
     r"<｜｜DSML｜｜\s*invoke\b([^>]*)>(.*?)</｜｜DSML｜｜\s*invoke\s*>",

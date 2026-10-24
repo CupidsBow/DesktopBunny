@@ -10,12 +10,12 @@ Alice 的目的是构建一个持续存在的智能生物，有身体状态、�
 ## 2. 模块划分
 
 - brain.py  Alice 的中枢，负责装配所有子模块、管理线程与生命周期
-- body/  身体模块，记录 Alice 当前的各项身体数值与状态，并派生情绪、态度、欲望
+- body/  身体模块，记录 Alice 当前的各项身体数值（精力/饱食/社交/昼夜等连续量），疲惫只由这些数值体现，不设醒/睡二元状态；并派生情绪、态度、欲望
 - environment/  环境模块，获取 Alice 周围的环境信息（电脑上的环境信息）
 - memory/  记忆模块，存储 Alice 的长短期记忆，并承担定期蒸馏记忆的功能
 - capabilities/  能力模块，管理 Alice 当前所有可以执行的操作
 - activity/  活动模块，管理当前 Alice 还没有完成的活动的状态
-- lifecycle/  生命循环，低频 tick（1~5 秒）推进身体与环境信息变化，把闹钟、显著变化、休息结束等唤醒事件封装进 event_queue
+- lifecycle/  生命循环，低频 tick（1~5 秒）推进身体与环境信息变化，把闹钟、显著变化等唤醒事件封装进 event_queue
 - event_queue/  事件队列，存储任何可以触发 Alice 思考并决策的事件，并负责事件的持久化与崩溃恢复
 - frame_generator/  帧生产者，取出当前一个或多个唤醒事件，与身体、环境、记忆、能力、活动信息聚合，整理成一帧数据传给 thinker
 - thinker/  认知决策，调用 LLM 读帧数据，产出并校验 Decision
@@ -30,12 +30,11 @@ Alice 的目的是构建一个持续存在的智能生物，有身体状态、�
 | | `tick(delta)` | 推进状态时钟（轻量，不调 LLM）|
 | | `submit_event(event)` | 外部事件入队并触发唤醒 |
 | | `snapshot()` | 返回桌宠只读快照 |
-| body/ | `tick(perception, interactions, dt)` | 按时间与互动推进身体数值 |
-| | `set_mode(mode)` | 切换醒 / 休息 |
-| | `stimulate(amount)` | 喂食/互动刺激警觉 |
+| body/ | `tick(environment, interactions, dt, busy_seconds)` | 按时间与互动推进身体数值 |
 | | `snapshot()` | 返回身体快照 |
+| | `save()` | 持久化身体状态 |
 | | `derive(body, memory_view, episodes, now)` | 派生情绪 / 态度 / 欲望 |
-| environment/ | `tick(bunny_snapshot, qq_connected)` | 聚合一次环境快照 |
+| environment/ | `tick(bunny_snapshot)` | 聚合一次环境快照 |
 | memory/ | `view(speaker)` | 取记忆只读视图（自我/目标/偏好/说话人/索引）|
 | | `recall(query, limit)` | 关键词召回相关记忆 |
 | | `read_semantic(target)` | 读某份语义记忆 |
@@ -53,7 +52,7 @@ Alice 的目的是构建一个持续存在的智能生物，有身体状态、�
 | | `update(...)` | 更新活动进度 / 状态 |
 | lifecycle/ | `tick(delta)` | 推进身体/环境、检测显著变化 |
 | | `schedule(next_wake_in, wake_when)` | 排下一次唤醒 |
-| | `due()` | 返回到期唤醒理由（闹钟/信号/最长发呆/休息）|
+| | `due()` | 返回到期唤醒理由（闹钟/信号/定期唤醒）|
 | event_queue/ | `add(event)` | 事件入队 |
 | | `unhandled()` | 取未处理事件 |
 | | `mark_handled(ids)` | 标记事件已处理 |

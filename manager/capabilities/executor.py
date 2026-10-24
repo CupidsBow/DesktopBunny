@@ -128,6 +128,11 @@ class CapabilityExecutor:
             orphans, self._orphans = self._orphans, []
             return orphans
 
+    def inflight_count(self) -> int:
+        """当前在途的异步能力数量；供 busy_seconds 汇总。"""
+        with self._inflight_lock:
+            return len(self._inflight)
+
     def _track_inflight(self, call: CapabilityCall, caller: str) -> None:
         if not self.inflight_path:
             return

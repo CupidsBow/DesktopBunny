@@ -30,11 +30,13 @@ class CapabilityRegistry:
         *,
         artifacts: ArtifactStore | None = None,
         memory: MemoryApi | None = None,
+        eat_handler: Callable[[str], bool] | None = None,
         now_fn: Callable[[], datetime] = now_local,
     ) -> None:
         self.config = config
         self.artifacts = artifacts
         self.memory = memory
+        self.eat_handler = eat_handler
         self.now_fn = now_fn
         self._capabilities: dict[str, Capability] = {}
         self._register_builtins()
@@ -288,6 +290,18 @@ class CapabilityRegistry:
                 timeout_seconds=5,
             )
 
+        if self.eat_handler is not None:
+            self.add(
+                "eat",
+                "吃点东西恢复饱食度；实际由桌宠本体执行，饱食度变化会稍后反映到身体状态。",
+                {
+                    **_OBJECT,
+                    "properties": {"food": {"type": "string"}},
+                },
+                self._eat,
+                timeout_seconds=5,
+            )
+
     def _time_now(self) -> dict[str, Any]:
         now = self.now_fn()
         return {
@@ -300,6 +314,12 @@ class CapabilityRegistry:
             "timezone": now.tzname(),
             "timestamp": int(now.timestamp()),
         }
+
+    def _eat(self, food: str = "胡萝卜") -> dict[str, Any]:
+        """把进食请求交给桌宠主线程；真实饱食度变化由快照回流。"""
+        food = (food or "胡萝卜").strip() or "胡萝卜"
+        accepted = bool(self.eat_handler(food))
+        return {"food": food, "accepted": accepted}
 
 
 class _ReadFile:

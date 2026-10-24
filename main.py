@@ -98,7 +98,6 @@ class World:
             transport=self.qq_client,
             snapshot_getter=bridge.get_bunny_snapshot,
             eat_handler=self._request_eat,
-            qq_connected_getter=lambda: self.qq_client.is_connected,
         )
         self.brain.start()
         self.qq_client.set_brain(self.brain)
@@ -334,7 +333,7 @@ class World:
             self.save_manager.save({"satiety": self.bunny.satiety})
 
     def _request_eat(self, food: str = "") -> bool:
-        """认知线程调用：把进食请求排队，等主线程下一帧执行。"""
+        """能力线程调用：把进食请求排队，等主线程下一帧执行。"""
         if not self.bunny or not self.running:
             return False
         self._eat_requests.put(food or "胡萝卜")

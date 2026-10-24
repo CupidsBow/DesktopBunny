@@ -10,19 +10,21 @@
 ```
 manager/
 ├── brain.md                 ← 总纲：原则、全局工作流、模块地图、契约、生命周期
-└── design/
-    ├── 01-body.md           感知、身体、自我状态（情绪/态度/欲望）
-    ├── 02-memory.md         记忆、情感痕迹、关系、召回、巩固
-    ├── 03-cognition.md      情境、决策协议、动作空间、LLM turn
-    ├── 04-activities.md     持续活动、探索、学习、反思、主动性
-    ├── 05-capabilities.md   工具、异步、审计、ToolExecutor
-    ├── 06-effector.md       聊天发送、多消息拆分、记忆写回
-    └── 07-mechanism.md      事件、唤醒、时钟、持久化、安全
+├── new_brain.md             ← 模块划分与接口速览（与本文一致）
+└── design/                 # 每个子模块一份文档，按数据流排序
+    ├── 01-environment.md    环境：在场、空闲、前台窗口、昼夜
+    ├── 02-body.md           身体与自我状态：稳态、情绪、态度、欲望
+    ├── 03-memory.md         记忆：情感痕迹、关系、召回、巩固
+    ├── 04-capabilities.md   能力：注册、异步、审计
+    ├── 05-activity.md       活动：持续行为、探索、学习、反思、主动性
+    ├── 06-lifecycle.md      生命循环：状态时钟、唤醒、闹钟、信号
+    ├── 07-event_queue.md    事件队列：事件、收件箱、账本、恢复
+    ├── 08-frame_generator.md 帧生成：情境装配与 prompt 组装
+    ├── 09-thinker.md        认知决策：Decision 协议与动作空间
+    └── 10-executor.md       执行：聊天发送、记忆写回
 ```
 
-建议阅读顺序：本文 → `01-body` → `02-memory` → `03-cognition` → `04-activities` → `05-capabilities` → `06-effector` → `07-mechanism`。
-
-代码目录、每个 `.py` 的职责/输入/输出、跨文件数据流见 §6.1–§6.6。
+> 注：设计文档已按当前 11 个模块重排：`environment/` 与 `body/` 各成一篇，`cognition/` 拆成 `frame_generator/` + `thinker/`，`activities/` 改 `activity/`，`effector/` 改 `executor/`，`mechanism/` 拆成 `lifecycle/` + `event_queue/`。本文与各文档均以**当前代码**为准。
 
 ---
 
@@ -30,9 +32,9 @@ manager/
 
 Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
-- 她有身体：饱食度、精力、警觉度、社交电量、昼夜节律。
+- 她有身体：饱食度、精力、社交电量、昼夜节律。疲惫只由这些连续量体现，不设醒/睡二元状态。
 - 她有记忆：具体经历、对每位朋友的态度、逐渐长成的自我认知。
-- 她有生活：聊天、上网、探索本地、学习、整理记忆、发呆、睡觉。
+- 她有生活：聊天、上网、探索本地、学习、整理记忆、发呆。
 - 她只有**一个意识**：同一时刻只想一件事，所有行为都出自同一个决策中心。
 
 **一个 LLM 决定她做什么。** 机制层不替她选择行为，只负责让她能持续、安全地活着。
@@ -43,11 +45,11 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
 1. **LLM 是唯一的决策者。** 做什么、对谁、何时、多久、继续还是放弃，全部由 LLM 判断。
 2. **机制不做行为决策。** 机制只做事件投递、唤醒、执行、约束、持久化。
-3. **聊天是行为之一。** 社交、探索、学习、内省、创造、身体活动、休息并列。
+3. **聊天是行为之一。** 社交、探索、学习、内省、创造并列。
 4. **所有对话者都是朋友。** 没有预设的更高身份；亲疏与信任从记忆里生长。
 5. **状态只作为输入。** 情绪、欲望、精力是情境里的信息，不是隐藏的开关。
 6. **身体是事实来源。** 饱食度等生理量来自桌宠本体，不由记忆层编造。
-7. **沉默与行动同等合法。** `idle`、`rest` 都是明确的选择。
+7. **沉默与行动同等合法。** `idle` 是明确的选择。
 8. **机制只保留执行边界。** 超时、取消、急停不可协商；没有权限裁剪，选择权属于 LLM。
 
 ### 决策与约束的边界
@@ -57,7 +59,7 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 | 做什么、对谁、何时、多久 | 除超时外不设约束 |
 | 继续、暂停还是放弃活动 | 工具与帧的超时、取消 |
 | 想多深、用哪些能力 | 线程与进程生命周期 |
-| 下一次什么时候醒来 | 事件投递与批量窗口 |
+| 下一次什么时候醒来 | 事件投递与串行帧 |
 | 要不要把发现分享出去 | 持久化、崩溃恢复、审计 |
 
 机制只执行约束，不利用约束反向影响选择。
@@ -68,16 +70,16 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
 | 行为 | 表达方式 | 执行者 |
 | --- | --- | --- |
-| 发消息 / 主动联系 | `chat.reply` / `chat.reach_out` | effector → QQ |
-| 上网 | `activity.start(explore.web)` + `web.*` | activities + capabilities |
-| 探索电脑 | `activity.start(explore.pc)` + `fs.*` / `pc.observe` | activities + capabilities |
-| 学习 / 整理 | `activity.start(learn)` + `web.*` / `memory.*` | activities + capabilities |
-| 创作 | `activity.start(create)` + `fs.write` / `sandbox.run` | activities + capabilities |
-| 思考 / 内省 | `activity.start(reflect)` + `memory.recall` / `idle` | activities + memory |
-| 休息 | `rest` | effector → body |
-| 什么都不做 | `idle`（闹钟可选） | effector（无输出） |
+| 发消息 / 主动联系 | `chat.reply` / `chat.reach_out` | executor → QQ |
+| 上网 | `activity.start(explore.web)` + `web.*` | activity + capabilities |
+| 探索电脑 | `activity.start(explore.pc)` + `fs.*` / `pc.observe` | activity + capabilities |
+| 学习 / 整理 | `activity.start(learn)` + `web.*` / `memory.*` | activity + capabilities |
+| 创作 | `activity.start(create)` + `fs.write` / `sandbox.run` | activity + capabilities |
+| 思考 / 内省 | `activity.start(reflect)` + `memory.recall` | activity + memory |
+| 吃点东西 | `tool.call(eat)` | capability → 桌宠主线程 |
+| 什么都不做 | `idle`（`next_wake_in` / `wake_when` 可选） | executor（无输出） |
 
-“平等”的含义是：没有哪个动作被机制特殊对待；机制不因为“是聊天”就优先执行，也不因为“是探索”就限制时长。区别只来自 LLM 当下的判断。
+“平等”的含义是：没有哪个动作被机制特殊对待。区别只来自 LLM 当下的判断。
 
 ---
 
@@ -90,31 +92,31 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
                           └──────────┬───────────┘
                                      ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ 生命维持 mechanism                                                │
-│ 事件收件箱 · 唤醒策略 · 帧串行 · 持久化 · 安全 · 审计          │
+│ 生命维持（lifecycle + event_queue + brain 循环）                 │
+│ 事件入队 · 唤醒理由 · 帧串行 · 持久化 · 安全 · 审计              │
 └───────────────────────────────┬──────────────────────────────────┘
-                                │ 唤醒 + 组装好的情境
+                                │ 唤醒理由 + 情境 + prompt
                                 ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ 认知 cognition（LLM）                                             │
+│ 认知（frame_generator 装帧 + thinker 调 LLM）                    │
 │ 读情境 → 选择一个动作                                             │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │ Decision
                                 ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ 执行 effector                                                     │
-│ 聊天 · 活动 · 能力调用 · 休息 · 记忆写入 · 状态更新                 │
+│ 执行 executor                                                     │
+│ 聊天 · 能力调用 · 活动 · 记忆写入 · 排下一次唤醒                   │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │ 结果 / 新事件
-                                └──────────────▶ 回到收件箱
+                                └──────────────▶ 回到事件队列
 
 支撑输入：
-  感知 perception ──▶ 身体 body ──▶ 自我状态 self_state
+  环境 environment ──▶ 身体 body ──▶ 自我状态 self_state
   记忆 memory（L0–L3）──▶ 情境装配
 ```
 
 **一句话数据流**：
-世界 → 事件 → 收件箱 → 唤醒 → 情境（感知 + 身体 + 自我状态 + 记忆 + 活动 + 约束）→ LLM 决策 → 执行 → 新事件/记忆/状态 → 下一次唤醒。
+世界 → 事件 → 事件队列 → 唤醒 → 情境（环境 + 身体 + 自我状态 + 记忆 + 活动 + 约束）→ LLM 决策 → 执行 → 新事件/记忆/状态 → 下一次唤醒。
 
 ---
 
@@ -129,80 +131,70 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 | **活动 activity** | 跨越多个回合的持续行为（探索、学习、反思） | 几十秒到数小时 |
 
 - 帧与帧之间严格串行，一次只有一个意识。
-- 工具调用的结果会作为事件回到收件箱，并立即触发下一帧。
+- 工具调用的结果会作为事件回到事件队列，并立即触发下一帧。
 - 活动是帧的序列，不是一次长调用；帧之间可以处理消息。
 
 ### 4.2 从一次唤醒到下一次唤醒
 
 ```
-① 状态时钟（每 1~5 秒）
-   更新感知、身体；派生自我状态；求值显著变化。
+① 状态时钟（每 2 秒，由 main 主线程调 brain.tick）
+   推进环境、身体；检测显著变化信号。
 
 ② 事件产生
-   消息 / 后台任务结果 / 活动检查点 / 系统事件 → 收件箱。
+   消息 / 能力结果 / 活动检查点 / 系统事件 → 事件队列。
 
-③ 唤醒策略
-   事件抵达 / LLM 闹钟 / 最长发呆 / 显著变化 → 唤醒认知。
+③ 唤醒理由
+   事件 / 闹钟（next_wake_in、wake_when）/ 信号 /
+   启动 / 定期心跳（periodic_wake_seconds）。
 
 ④ 情境装配
-   从各模块取：感知、身体、自我状态、记忆索引、
-   当前活动、收件箱、能力列表、约束。
+   frame_generator 从各模块取：环境、身体、自我状态、记忆视图、
+   当前活动、未处理事件、能力清单、约束、唤醒理由。
 
 ⑤ 认知
-   LLM 读情境，输出 Decision：
+   thinker 调 LLM 读情境，产出 Decision：
    tool.call / chat.reply / chat.reach_out /
    activity.start / activity.pause / activity.resume /
-   activity.complete / activity.abandon /
-   eat / rest / idle
+   activity.complete / activity.abandon / idle
 
 ⑥ 校验与执行
-   校验 Decision；非法则修复或退回。
-   effector 落地：发消息、启动后台任务、写记忆。
+   校验 Decision；非法则修复一次，仍失败则本帧失败。
+   executor 落地：发消息、派发能力、更新活动、写记忆。
 
 ⑦ 状态与记忆更新
-   活动进度、事件账本、情绪痕迹、语义记忆。
+   活动进度、事件账本、情感痕迹、语义记忆。
 
 ⑧ 排下一次唤醒
-   LLM 给出 next_wake_in / wake_when；
-   activity.pause 还可以带 resume_when。
+   终态动作可给 next_wake_in / wake_when；
+   activity.pause 可带 args.resume_when。
    机制钳制上下限；事件永远可以提前唤醒。
 
 ⑨ 等待
-   帧结束。机制等待下一个唤醒信号，期间不调用 LLM。
+   帧结束。认知 worker 回到 wait（0.5 秒轮询），期间不调用 LLM。
 ```
 
 ### 4.3 一次具体例子
 
 ```
-21:03  朋友 u_123 连发：
-       "在吗" / "上次那篇文章还有吗" / "算了不用了"
+21:03  朋友 u_123 连发三条消息，逐条进入事件队列，触发唤醒。
 
-21:03  三条消息进入收件箱，稳定窗口后合并为一次唤醒。
+21:03  frame_generator 装帧：三条消息 + 对 u_123 的态度 + 精力/社交电量。
        此时 Alice 正在 explore.web 的第 3 步。
 
-21:03  机制在活动检查点结束当前帧，把"活动进度 40%"和
-       "三条新消息（Alice 忙碌时追加）"一起放进情境。
-
-21:04  LLM 看到：
-       - 活动：正在查"开源模型"资料，进度 40%
-       - 朋友 u_123 的三条消息，标注为连续追加
-       - 对 u_123 的态度：熟络
-       - 当前精力 0.7，社交电量 0.6
+21:04  LLM 看到：活动进度 40% + 三条新消息（标注 arrived_during）。
        决定先回复；用 memory.recall 找回上次推荐的文章。
 
-21:04  tool.call → memory.recall，结果作为事件返回，触发下一帧。
+21:04  tool.call → memory.recall，结果作为 capability_done 事件返回，触发下一帧。
 
-21:04  LLM 决定 chat.reply，内容包含文章名；
-       handled 标记三条消息全部处理。
+21:04  LLM 决定 chat.reply，内容包含文章名；handled 标记三条消息全部处理。
 
-21:05  effector 把回复按自然边界拆成两条，间隔 0.8 秒发出。
-       Alice 记一条情景："u_123 又来问那篇文章，聊得挺轻松"，valence +0.4。
+21:05  executor 发出回复（一条消息，不拆分）。
+       Alice 记一条情景："u_123 又来问那篇文章"，valence +0.4。
 
-21:05  LLM 决定 activity.resume，next_wake_in=0。
+21:05  LLM 决定 activity.resume。
        下一帧继续探索。
 
-21:30  活动完成，LLM 把发现写进记忆；
-       next_wake_in=600，等待下一次醒来。
+21:30  活动完成，LLM 把发现写进记忆；next_wake_in=600，等待下一次醒来。
 ```
 
 ---
@@ -213,22 +205,22 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
 | 时钟 | 频率 | 做什么 | 调 LLM |
 | --- | --- | --- | --- |
-| 状态时钟 | 1~5 秒 | 更新感知/身体，派生自我状态，求值显著变化 | 否 |
-| 认知时钟 | 不固定 | 一次帧决策 | 是 |
-| 活动步骤 | 由检查点/后台任务/`next_wake_in` 决定 | 推进活动 | 是（每步一帧） |
-| 巩固时钟 | 夜间/空闲/周期 | 记忆蒸馏（LLM 巩固任务） | 是 |
+| 状态时钟 | 2 秒（`state_tick_interval`） | 推进环境/身体，检测显著变化 | 否 |
+| 认知 worker 轮询 | 0.5 秒（`_POLL_INTERVAL`） | 检查到期闹钟、取唤醒理由 | 否（只在有理由时调） |
+| 认知帧 | 不固定 | 一次帧决策 | 是 |
+| 巩固循环 | 60 秒检查一次（`consolidation_interval`=6h） | 记忆蒸馏 | 是 |
+| 定期心跳 | 1800 秒（`periodic_wake_seconds`） | 兜底唤醒 | 是 |
 
 ### 5.2 线程
 
 | 线程 | 职责 |
 | --- | --- |
 | pygame 主线程 | 动画、桌面交互、`brain.tick()` 的轻量部分 |
-| QQ 接收线程 | 网关连接、事件接收 → 收件箱 |
-| 认知 worker | LLM 调用、Decision 解析；一次只有一个 |
-| 能力 worker | 网页、文件、系统调用等耗时任务；可并发 |
+| QQ 接收线程 | 网关连接、事件接收 → `brain.submit_event` |
+| 认知 worker | 轮询唤醒理由、调 LLM、解析 Decision；一次只有一个 |
+| 能力执行 | 网页、文件、系统调用等耗时任务；可并发 |
 | 巩固 worker | 记忆蒸馏；只提交写操作 |
 | 记忆 worker | 统一串行执行 L2/L3 与索引写入 |
-| 持久化 worker | 事件账本、闹钟、活动快照的落盘与恢复 |
 
 主线程永远不做网络、模型或大文件操作。
 
@@ -236,15 +228,15 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
 | 状态 | 拥有者 | 读取者 |
 | --- | --- | --- |
-| 感知快照 | perception | 情境装配 |
+| 环境快照 | environment | 情境装配 |
 | 身体状态 | body | 自我状态、情境装配 |
-| 情绪/态度/欲望 | self_state（派生） | 情境装配 |
+| 情绪/态度/欲望 | self_state（派生，不落盘） | 情境装配 |
 | L0–L3 记忆 | memory | 情境装配、巩固 |
-| 事件与账本 | mechanism | 情境装配、认知 |
-| 当前帧/回合 | cognition | mechanism |
-| 活动记录 | activities | 情境装配、cognition |
-| 出站消息状态 | effector | mechanism |
-| 闹钟 | mechanism | 情境装配 |
+| 事件与账本 | event_queue | 情境装配、认知 |
+| 当前回合 | brain（`_turn`） | 情境装配 |
+| 活动记录 | activity | 情境装配、executor |
+| 出站消息状态 | executor | 情境装配 |
+| 闹钟 | lifecycle | 情境装配 |
 
 模块之间不直接写对方的状态，通过明确的接口交换数据。
 
@@ -254,125 +246,99 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
 | 模块 | 文档 | 负责 | 绝不负责 |
 | --- | --- | --- | --- |
-| 感知 | [01-body](design/01-body.md) | 把世界转成结构化事件与快照 | 判断重要性 |
-| 身体 | [01-body](design/01-body.md) | 内感受与稳态 | 决定行为 |
-| 自我状态 | [01-body](design/01-body.md) | 派生情绪、态度、欲望强度 | 阈值触发行为 |
-| 记忆 | [02-memory](design/02-memory.md) | 存取、召回、巩固、关系 | 参与控制流 |
-| 认知 | [03-cognition](design/03-cognition.md) | 组装情境、调用 LLM、产出 Decision | 决定何时被调用 |
-| 活动 | [04-activities](design/04-activities.md) | 持续行为的进度、暂停、恢复 | 自行发起新行为 |
-| 能力 | [05-capabilities](design/05-capabilities.md) | 工具注册、异步、审计 | 决定调用什么 |
-| 执行 | [06-effector](design/06-effector.md) | 把 Decision 落地为输出 | 修改 Decision |
-| 生命维持 | [07-mechanism](design/07-mechanism.md) | 事件、唤醒、持久化、安全 | 任何行为决策 |
+| 环境 environment | [01-environment](design/01-environment.md) | 聚合周围环境快照 | 判断重要性 |
+| 身体 body | [02-body](design/02-body.md) | 内感受与稳态 | 决定行为 |
+| 自我状态 self_state | [02-body](design/02-body.md) | 派生情绪、态度、欲望 | 阈值触发行为 |
+| 记忆 memory | [03-memory](design/03-memory.md) | 存取、召回、巩固、关系 | 参与控制流 |
+| 能力 capabilities | [04-capabilities](design/04-capabilities.md) | 工具注册、异步、审计 | 决定调用什么 |
+| 活动 activity | [05-activity](design/05-activity.md) | 持续行为的进度、暂停、恢复 | 自行发起新行为 |
+| 生命循环 lifecycle | [06-lifecycle](design/06-lifecycle.md) | 状态时钟、闹钟、信号 | 任何行为决策 |
+| 事件队列 event_queue | [07-event_queue](design/07-event_queue.md) | 事件入队、账本、持久化 | 决定何时被处理 |
+| 帧生成 frame_generator | [08-frame_generator](design/08-frame_generator.md) | 组装情境与 prompt | 修改各模块状态 |
+| 认知决策 thinker | [09-thinker](design/09-thinker.md) | 调用 LLM、产出 Decision | 决定何时被调用 |
+| 执行 executor | [10-executor](design/10-executor.md) | 把 Decision 落地为输出 | 修改 Decision |
 
 ### 6.1 目录树
 
-> 下面是目标架构。尚未实现的 `.py` 保持空文件占位；已实现的文件会在文件头注明。
-> 当前已完成 `shared/types.py`（全部跨模块数据契约）与 `shared/config.py`（路径与可调参数）。职责、输入与输出以本节为准。
-> 每个包目录都有一个空的 `__init__.py`，下文中省略。
-
 ```text
-desktop_bunny/
-├── main.py                         # pygame 应用入口：窗口、桌宠循环、托盘
-├── constants/
-│   └── constants.py                # .env、身份常量、路径与运行参数
-├── components/                     # 身体渲染与物理（不含大脑）
-│   ├── bunny.py                    # Alice 的身体与饱食度权威
-│   ├── bunny_platform.py
-│   ├── animation_player.py
-│   └── sprite.py
-├── bot/                            # 传输边界：QQ 与桌面
-│   ├── bridge.py                   # Alice 单只状态快照（线程安全）
-│   ├── qq_client.py                # QQ 网关与 REST 传输
-│   └── qq_adapter.py               # 原始 QQ 事件 → 事件信封
-├── tools/                          # 纯函数工具实现（不导入 manager）
-│   ├── tool_executor.py            # 工具注册表与同步执行
-│   ├── get_local_time.py
-│   ├── platform_detector.py
-│   ├── web_tools.py                # web.search / web.fetch 的纯函数
-│   ├── fs_tools.py                 # fs.list / read / search / write
-│   ├── sandbox_tools.py            # sandbox.run
-│   └── pc_tools.py                 # pc.observe
-└── manager/
-    ├── brain.py                    # 组合根与对外门面
-    ├── save_manager.py
-    ├── design/                     # 01–07 设计文档
-    ├── shared/
-    │   ├── types.py                # 数据类、枚举、错误
-    │   ├── config.py               # 运行参数与路径
-    │   ├── logging_setup.py        # 日志配置
-    │   ├── timeutil.py             # 时间、ISO、衰减、钳制
-    │   └── llm_client.py           # LLM HTTP 传输（重试/超时/流式）
-    ├── perception/
-    │   ├── perception.py           # 感知快照聚合
-    │   ├── presence.py             # 空闲时长与在场
-    │   └── foreground.py           # 前台应用粗分类
-    ├── body/
-    │   ├── body.py                 # BodyState 与稳态
-    │   └── self_state.py           # 心情、态度、欲望（派生）
-    ├── memory/
-    │   ├── memory.py               # 记忆门面与 L1
-    │   ├── store.py                # L2/L3 文件读写
-    │   ├── index.py                # MEMORY.md 索引
-    │   ├── recall.py               # memory.recall
-    │   ├── compression.py          # L1 超限压缩并归档到 L2
-    │   ├── consolidation.py        # 巩固任务（只产出写操作）
-    │   └── worker.py               # 记忆写入串行队列
-    ├── cognition/
-    │   ├── cognition.py            # 一次认知帧
-    │   ├── situation.py            # 情境装配
-    │   ├── prompt.py               # prompt 组装
-    │   └── decision.py             # Decision 解析/校验/修复
-    ├── activities/
-    │   ├── activities.py           # 活动生命周期与检查点
-    │   └── store.py                # activities.json
-    ├── capabilities/
-    │   ├── registry.py             # 能力注册与 schema
-    │   ├── executor.py             # 参数校验、异步、超时、结果截断
-    │   ├── audit.py                # 审计日志
-    │   ├── artifacts.py            # artifact 存取
-    │   └── memory_api.py           # memory.* 能力适配
-    ├── effector/
-    │   ├── effector.py             # Decision → 输出
-    │   ├── chat_sender.py          # 被动/主动发送与降级
-    │   └── message_splitter.py     # 多消息拆分（纯函数）
-    └── mechanism/
-        ├── mechanism.py            # 运行时循环
-        ├── events.py               # 收件箱与事件账本
-        ├── wake.py                 # 唤醒理由聚合
-        ├── alarms.py               # next_wake_in / wake_when / resume_when
-        ├── signals.py              # 显著变化检测
-        ├── clocks.py               # 状态时钟与休息间隔
-        ├── persistence.py          # 落盘 worker 与崩溃恢复
-        └── control.py              # 运行/停止/急停
+manager/
+├── brain.py                    # 组合根与对外门面：装配、线程、帧循环
+├── save_manager.py             # 本地存档的 JSON 混淆读写
+├── design/                     # 01–10 设计文档
+├── shared/
+│   ├── types.py                # 数据类、枚举、错误（跨模块契约）
+│   ├── config.py               # BrainConfig / BrainPaths 与全部可调参数
+│   ├── logging_setup.py        # 日志配置
+│   ├── timeutil.py             # 时间、ISO、衰减、钳制
+│   ├── jsonutil.py             # JSON 提取与容错
+│   └── llm_client.py           # LLM HTTP 传输（重试/超时）
+├── environment/
+│   ├── environment.py          # EnvironmentState 聚合
+│   ├── presence.py             # 空闲时长与在场
+│   └── foreground.py           # 前台窗口粗分类
+├── body/
+│   ├── body.py                 # BodyState 与稳态
+│   └── self_state.py           # 心情、态度、欲望（派生）
+├── memory/
+│   ├── memory.py               # 记忆门面与 L1
+│   ├── store.py                # L2/L3 文件读写
+│   ├── index.py                # MEMORY.md 索引
+│   ├── recall.py               # memory.recall
+│   ├── compression.py          # L1 超限压缩并归档到 L2
+│   ├── consolidation.py        # 巩固任务（只产出写操作）
+│   └── worker.py               # 记忆写入串行队列
+├── capabilities/
+│   ├── registry.py             # 能力注册与 schema
+│   ├── executor.py             # 参数校验、异步、超时、结果截断
+│   ├── audit.py                # 审计日志
+│   ├── artifacts.py            # artifact 存取
+│   └── memory_api.py           # memory.* 能力适配
+├── activity/
+│   ├── activity.py             # ActivityService 生命周期与检查点
+│   └── store.py                # activities.json
+├── lifecycle/
+│   ├── lifecycle.py            # 状态时钟、唤醒排布、due()
+│   ├── alarms.py               # next_wake_in / wake_when 存储与求值
+│   └── signals.py              # 显著变化检测
+├── event_queue/
+│   └── event_queue.py          # 事件账本与持久化恢复
+├── frame_generator/
+│   ├── frame_generator.py      # 帧生产者：聚合唤醒理由与只读视图
+│   ├── situation.py            # SituationBuilder
+│   └── prompt.py               # L0 + 情境 + 能力 + 输出协议
+├── thinker/
+│   ├── thinker.py              # 调 LLM、解析并校验 Decision
+│   └── decision.py             # DecisionParser / repair_message
+└── executor/
+    ├── executor.py             # Decision → 输出与状态变化
+    └── chat_sender.py          # 被动/主动发送与投递状态
 ```
 
-分层是单向的：`shared` ← 状态模块 ← `cognition` / `effector` ← `mechanism` ← `brain` ← `main`。`bot/` 只与 `brain.submit_event` 和 `bridge` 交互。
+分层是单向的：`shared` ← 状态模块 ← `frame_generator`/`thinker`/`executor` ← `brain` ← `main`。`bot/` 只与 `brain.submit_event` 和 `bridge` 交互。
 
 ### 6.2 依赖方向
 
 ```text
-main ──▶ brain ──▶ mechanism ──▶ cognition ──▶ situation / prompt / decision
-  │        │           │              │
-  │        │           ├──────────────┼──▶ perception / body / self_state
-  │        │           ├──────────────┼──▶ memory / activities
-  │        │           ├──────────────┼──▶ capabilities ──▶ tools
-  │        │           └──────────────┴──▶ effector ──▶ bot / body
+main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator ──▶ thinker ──▶ llm_client
+  │        │            │
+  │        │            ├──▶ environment / body / self_state
+  │        │            ├──▶ memory / activity
+  │        │            ├──▶ capabilities ──▶ tools
+  │        │            └──▶ executor ──▶ bot / body
   │        └──▶ shared（所有模块都可依赖）
   └──▶ bot（QQ 传输）──▶ qq_adapter ──▶ brain.submit_event
 ```
 
 规则：
 
-1. 依赖只能向下：`shared` 不导入业务模块；状态模块不导入 `mechanism`。
-2. `cognition` 只读：不写记忆、不改活动、不标事件；它只返回 Decision。
-3. `effector` 只写输出：不改写 Decision，不重新判断。
-4. `mechanism` 只决定“何时跑一帧”，不决定“跑完做什么”。
+1. 依赖只能向下：`shared` 不导入业务模块；状态模块不导入 `brain`。
+2. `frame_generator` / `thinker` 只读：不写记忆、不改活动、不标事件；只返回 Decision。
+3. `executor` 只写输出：不改写 Decision，不重新判断。
+4. `brain` 只决定"何时跑一帧"，不决定"跑完做什么"。
 5. `tools/` 的纯函数不导入 `manager/`；需要记忆的能力由 `capabilities/memory_api.py` 适配。
-6. 禁止循环依赖：`memory/consolidation.py` 只依赖 `shared/llm_client.py`、`memory/store.py` 与 `memory/worker.py`，不导入 `cognition`。
+6. 禁止循环依赖：`memory/consolidation.py` 只依赖 `shared/llm_client.py`、`memory/store.py` 与 `memory/worker.py`。
 
 ### 6.3 文件职责与输入输出
-
-> 输入/输出均指模块边界上的数据，不是内部实现细节。所有跨线程数据都应是可序列化的普通 dict / dataclass。
 
 **入口与身体**
 
@@ -380,94 +346,66 @@ main ──▶ brain ──▶ mechanism ──▶ cognition ──▶ situation
 | --- | --- | --- | --- |
 | `main.py` | 应用生命周期、pygame 窗口、托盘、每帧循环；把桌面输入交给 Brain | pygame/OS 事件、存档、`.env` | 渲染帧、`bridge` 快照、Brain 的启动/停止/tick 调用 |
 | `constants/constants.py` | 读取 `.env`，提供身份、路径、模型与运行参数 | `.env`、文件系统 | 模块级常量 |
-| `components/bunny.py` | Alice 的动画、物理与**饱食度权威**；自主播放动画与睡眠姿态 | `delta`、喂食/自主进食/拖放、身体状态 | 精灵帧、饱食度快照、身体姿态 |
-| `components/single_instance.py` | 进程级单实例闸门（Windows 具名互斥量）；挡住第二个 Bunny，包括 LLM 借 sandbox 自启动 | 无 | 是否唯一实例 |
-| `components/bunny_platform.py` / `animation_player.py` / `sprite.py` | 现有渲染与平台辅助，不含大脑状态 | 屏幕尺寸、资源文件 | 平台矩形、动画帧、精灵 |
+| `components/bunny.py` | Alice 的动画、物理与**饱食度权威**；自主播放动画 | `delta`、喂食/自主进食/拖放、身体状态 | 精灵帧、饱食度快照 |
 | `manager/save_manager.py` | 本地存档的 JSON 混淆读写 | `dict` / 文件 | `dict` / 文件 |
 
 **shared**
 
 | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- |
-| `shared/types.py` | 所有跨模块数据类与枚举：`Event`、`Decision`、`BodyState`、`Perception`、`SelfState`、`Activity`、`CapabilityCall`、`CapabilityResult`、`MemoryWriteOp`、`MemoryView`、`BunnySnapshot`、`AuditRecord`、`Situation`、错误；附带 `to_dict`/`from_dict` | 构造参数 / JSON dict | 类型实例 / JSON dict |
-| `shared/config.py` | 从 constants 组装 `BrainConfig`，提供路径与全部可调参数 | constants / env | `BrainConfig` / `BrainPaths` |
-| `shared/logging_setup.py` | 日志 handler、轮转、级别 | 日志目录/级别 | 配置好的 logger |
-| `shared/timeutil.py` | ISO/时间戳转换、时长、指数衰减、区间钳制 | 时间值 | 归一化时间/数值 |
-| `shared/llm_client.py` | LLM HTTP 传输：超时、有限重试、退避、可选流式 | `messages`、超时 | 文本内容或 `LLMError` |
+| `shared/types.py` | 所有跨模块数据类与枚举：`Event`、`Decision`、`BodyState`、`EnvironmentState`、`SelfState`、`Activity`、`Capability`、`CapabilityResult`、`MemoryWriteOp`、`MemoryView`、`BunnySnapshot`、`AuditRecord`、`WakeReason`、错误；附带 `to_dict`/`from_dict` | 构造参数 / JSON dict | 类型实例 / JSON dict |
+| `shared/config.py` | 从 constants 组装 `BrainConfig` / `BrainPaths`，提供全部可调参数 | constants / env | `BrainConfig` / `BrainPaths` |
+| `shared/llm_client.py` | LLM HTTP 传输：超时、有限重试、退避 | `messages`、超时 | 文本内容或 `LLMError` |
 
-**perception / body**
+**environment / body**
 
 | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- |
-| `perception/perception.py` | 每个状态时钟聚合一次感知快照 | `bunny_snapshot`、QQ 连接状态、OS API | `Perception` |
-| `perception/presence.py` | 电脑前是否有人 | `GetLastInputInfo` | `idle_seconds`、`someone_present` |
-| `perception/foreground.py` | 前台应用粗分类与持续时长 | `pywinctl` 窗口信息 | `foreground_app`、dwell |
-| `body/body.py` | 维护 `BodyState`；读取饱食度快照，更新精力/警觉/社交/昼夜/mode | `Perception`、饱食度快照、互动、`dt` | `BodyState` |
+| `environment/environment.py` | 每个状态时钟聚合一次环境快照 | `bunny_snapshot`、OS API | `EnvironmentState` |
+| `environment/presence.py` | 电脑前是否有人 | `GetLastInputInfo` | `idle_seconds`、`someone_present` |
+| `environment/foreground.py` | 前台窗口粗分类与持续时长 | `pywinctl` 窗口信息 | `foreground_title`、dwell |
+| `body/body.py` | 维护 `BodyState`；读取饱食度快照，更新精力/社交/昼夜 | 环境、饱食度快照、互动、`dt`、忙碌时长 | `BodyState` |
 | `body/self_state.py` | 从身体与记忆派生心情/态度/欲望；只读 | `BodyState`、记忆视图、当前时间 | `SelfState` |
 
-**memory**
+**memory / capabilities**
 
 | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- |
-| `memory/memory.py` | 记忆门面：L1 工作记忆与 `state/l1.json` 存档、读取、召回、提交写入；不判断内容价值 | 查询、写操作、当前回合 | 记忆视图、召回结果、写操作 id |
+| `memory/memory.py` | 记忆门面：L1 工作记忆、读取、召回、提交写入；不判断内容价值 | 查询、写操作、当前回合 | 记忆视图、召回结果、写操作 id |
 | `memory/store.py` | L2/L3 文件布局、frontmatter 解析、原子写 | 路径、内容、元数据 | 记录对象、写入结果 |
 | `memory/index.py` | `MEMORY.md` 的解析与增删改 | 索引行、写操作 | 索引列表、更新后的文件 |
-| `memory/recall.py` | 按查询扫描索引、L2、朋友档案，返回摘要与引用 | `query`、`limit` | `[{ref, summary, valence, arousal}]` |
+| `memory/recall.py` | 按查询扫描索引、L2、朋友档案 | `query`、`limit` | `[{ref, summary, valence, arousal}]` |
 | `memory/consolidation.py` | 组装并执行巩固 LLM 任务；只返回写操作 | 近期 L2、L3、prompt | `list[MemoryWriteOp]` |
-| `memory/worker.py` | 所有记忆写入的串行队列：去重、索引、重试 | `MemoryWriteOp` | 写入结果；持续失败发 `system` 事件 |
-
-**cognition / activities**
-
-| 文件 | 职责 | 输入 | 输出 |
-| --- | --- | --- | --- |
-| `cognition/cognition.py` | 执行一次认知帧；串行、超时、失败降级 | `Situation`、`BrainConfig` | `Decision` + 帧状态/耗时 |
-| `cognition/situation.py` | 装配情境：感知、身体、自我、记忆索引、活动、收件箱、能力、约束、投递状态 | 各模块只读视图 | `Situation` |
-| `cognition/prompt.py` | 组装 L0、情境 JSON、能力 schema、约束、决策指令 | `Situation`、能力 schema、L0 | `messages` |
-| `cognition/decision.py` | 从文本提取 JSON，校验字段/动作/参数，修复一次，钳制范围 | 原始文本、事件 id 集合 | `Decision` 或 `DecisionError` |
-| `activities/activities.py` | 活动生命周期：start/pause/resume/complete/abandon、`steps_used`、检查点事件 | 活动动作、`activity_update`、当前时间 | 当前 `Activity`、`activity_checkpoint` 事件 |
-| `activities/store.py` | `activities.json` 的读写与恢复 | `Activity` 列表 | 文件 / 恢复后的列表 |
-
-**capabilities / effector**
-
-| 文件 | 职责 | 输入 | 输出 |
-| --- | --- | --- | --- |
-| `capabilities/registry.py` | 定义 `Capability`，注册内置能力，输出 schema 清单 | handler、schema、超时配置 | `Capability` 表、能力清单 |
-| `capabilities/executor.py` | 参数校验、同步/异步派发、超时、结果截断/artifact、结构化错误 | `CapabilityCall` | `CapabilityResult`；异步完成发 `capability_done/failed` 事件 |
+| `memory/worker.py` | 所有记忆写入的串行队列：去重、索引、重试 | `MemoryWriteOp` | 写入结果 |
+| `capabilities/registry.py` | 注册能力，输出 schema 清单 | handler、schema、超时 | `Capability` 表、能力清单 |
+| `capabilities/executor.py` | 参数校验、同步/异步派发、超时、结果截断 | `CapabilityCall` | `CapabilityResult` |
 | `capabilities/audit.py` | 追加式审计日志 | 调用元数据 | JSONL 行 |
 | `capabilities/artifacts.py` | 大结果的存取与引用解析 | 文本/字节、`artifact://` ref | ref / 分片 |
 | `capabilities/memory_api.py` | 把 `memory.recall/read/write` 适配为能力 handler | 能力 args | 结构化结果 / 写操作 |
-| `effector/effector.py` | 按固定顺序把 Decision 落地；不修改 Decision | `Decision` | 发送、活动/状态更新、记忆提交、唤醒排程 |
-| `effector/chat_sender.py` | 被动回复优先、失败降级主动、有限重试、投递状态 | 目标、文本、`msg_id` | `DeliveryStatus` |
-| `effector/message_splitter.py` | 按自然边界拆分，不拆 Markdown 结构 | 文本 | `list[str]` |
 
-**mechanism / brain**
+**activity / lifecycle / event_queue**
 
 | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- |
-| `mechanism/mechanism.py` | 运行时循环：状态时钟、唤醒、单帧串行、调度执行 | 唤醒理由、事件 | 帧调用、effect 调用、生命周期 |
-| `mechanism/events.py` | 收件箱与事件账本；只追加，只有 `handled` 改变状态 | `Event`、`handled` 列表 | 未处理事件列表、账本 |
-| `mechanism/wake.py` | 聚合事件/闹钟/最长间隔/显著变化，稳定窗口后唤醒 | 唤醒源 | 唤醒决定、`wake_reasons` |
-| `mechanism/alarms.py` | `next_wake_in`、`wake_when` 与活动 `resume_when` 的存储和谓词求值 | 闹钟、活动、当前状态 | 到期闹钟、谓词结果 |
-| `mechanism/signals.py` | 连续信号的死区、迟滞、合并 | 前后 `Perception`/`BodyState` | `signal` 事件 |
-| `mechanism/clocks.py` | 状态时钟周期；休息时切换最长间隔；巩固周期到点 | 当前时间、`body.mode`、上次巩固时间 | tick 是否到期、巩固是否到期 |
-| `mechanism/persistence.py` | 持久化 worker 与崩溃恢复 | 账本、活动、闹钟、快照 | JSON/JSONL 文件、恢复状态 |
-| `mechanism/control.py` | 运行标志、停止、急停、取消令牌 | 控制命令 | 标志/取消信号 |
-| `manager/brain.py` | 组合根与对外门面：创建对象、注入依赖、启动线程、提交事件、tick | 事件、tick、生命周期调用 | 已装配的运行时、帧调度、事件接收 |
+| `activity/activity.py` | 活动生命周期：start/pause/resume/complete/abandon、`steps_used`、检查点 | 活动动作、`activity_update`、当前时间 | 当前 `Activity`、检查点 |
+| `activity/store.py` | `activities.json` 的读写与恢复 | `Activity` 列表 | 文件 / 恢复后的列表 |
+| `lifecycle/lifecycle.py` | 状态时钟、唤醒排布（`schedule`）、到期理由（`due`） | `delta`、`next_wake_in`、`wake_when` | 信号变化、唤醒理由 |
+| `lifecycle/alarms.py` | `next_wake_in`、`wake_when` 的存储和谓词求值 | 闹钟、身体、环境 | 到期闹钟 |
+| `lifecycle/signals.py` | 连续信号的死区、迟滞、合并 | 前后 `BodyState`/`EnvironmentState` | `signal` 变化 |
+| `event_queue/event_queue.py` | 事件账本；只追加，只有 `handled` 改变状态 | `Event`、`handled` 列表 | 未处理事件列表、账本 |
 
-**bot / tools**
+**frame_generator / thinker / executor / brain**
 
 | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- |
-| `bot/bridge.py` | Alice 单只状态快照（线程安全） | 快照 | 快照 |
-| `bot/qq_client.py` | QQ 网关连接、鉴权、心跳、REST 发送 | 网关、发送请求 | 原始 dispatch、发送结果 |
-| `bot/qq_adapter.py` | 原始 QQ 事件 → `Event`，并提交给 Brain | `C2C_MESSAGE_CREATE` 等原始 dict | `Event` → `brain.submit_event` |
-| `tools/tool_executor.py` | 工具注册、schema、同步执行 | 工具名、args | 工具结果 / 错误 |
-| `tools/get_local_time.py` | 当前时间纯函数 | 无 | 时间字符串 |
-| `tools/platform_detector.py` | 屏幕可站立平台检测（主线程 UI 用） | 屏幕尺寸 | 平台矩形 |
-| `tools/web_tools.py` | 搜索与网页正文抓取纯函数 | query / url | 结果列表 / 正文与元数据 |
-| `tools/fs_tools.py` | 目录、读取、检索、写入纯函数 | path / pattern / content | 结构化文件结果 |
-| `tools/sandbox_tools.py` | 运行命令或代码 | command/code、cwd、timeout | stdout/stderr/exit |
-| `tools/pc_tools.py` | 前台、进程、资源观测 | `what` 列表 | 观测快照 |
+| `frame_generator/frame_generator.py` | 聚合唤醒理由与只读视图，产出一帧 | 唤醒理由、各模块只读视图 | 一帧数据 |
+| `frame_generator/situation.py` | 装配情境：环境、身体、自我、记忆、活动、收件箱、能力、约束 | 各模块只读视图 | `Situation` |
+| `frame_generator/prompt.py` | 组装 L0、情境 JSON、能力 schema、约束、输出协议 | `Situation`、能力 schema | `messages` |
+| `thinker/thinker.py` | 执行一次认知：调 LLM、解析并校验 Decision | 一帧 | `Decision` + 帧状态 |
+| `thinker/decision.py` | 从文本提取 JSON，校验字段/动作/参数，钳制范围 | 原始文本、事件 id 集合 | `Decision` 或 `DecisionError` |
+| `executor/executor.py` | 按固定顺序把 Decision 落地；不修改 Decision | `Decision` | 发送、活动/状态更新、记忆提交、唤醒排程 |
+| `executor/chat_sender.py` | 被动回复优先、失败降级主动、投递状态 | 目标、文本、`msg_id` | `DeliveryStatus` |
+| `manager/brain.py` | 组合根与对外门面：创建对象、注入依赖、启动线程、帧循环 | 事件、tick、生命周期调用 | 已装配的运行时、帧调度、事件接收 |
 
 **Brain 对外接口（组合根）**
 
@@ -475,16 +413,15 @@ main ──▶ brain ──▶ mechanism ──▶ cognition ──▶ situation
 class Brain:
     def start(self) -> None: ...
     def stop(self, reason: str) -> None: ...
-    def tick(self, delta: float) -> None: ...          # 主线程，轻量
-    def submit_event(self, event: Event) -> None: ...  # 任意线程
-    def feed(self) -> None: ...                        # 桌面喂食
+    def tick(self, delta: float) -> None: ...          # 主线程，轻量，不调 LLM
+    def submit_event(self, event: Event) -> Event: ... # 任意线程，只入队并唤醒
     def snapshot(self) -> dict: ...                    # satiety 等只读快照
 ```
 
 - `submit_event` 只入队并通知唤醒；不直接跑帧。
-- `tick` 只推进状态时钟与 bridge 消费；不调用 LLM。
+- `tick` 只推进状态时钟；不调用 LLM。
 - `start/stop` 管理线程、持久化与恢复。
-- `main.py` 与 `bot/` 只依赖这四个方法；不直接碰内部模块。
+- `main.py` 与 `bot/` 只依赖这几个方法；不直接碰内部模块。
 
 ### 6.4 数据流
 
@@ -494,13 +431,11 @@ class Brain:
 QQ 网关
   └─ QQClient 收到 C2C_MESSAGE_CREATE
        └─ QQAdapter.normalize(raw)
-            → Event(kind="message",
-                    source={friend_id, conversation_id},
-                    payload={text, msg_id, at})
+            → Event(kind="message", source={friend_id, conversation_id},
+                    payload={text, msg_id, conversation_type})
             → Brain.submit_event(event)
-                 ├─ Inbox.append(event)              # 未处理
-                 ├─ PersistenceWorker.enqueue(ledger)
-                 └─ WakeController.notify("event")   # 稳定窗口后唤醒
+                 ├─ EventQueue.add(event)             # 未处理
+                 └─ _notify(EVENT)                    # 立即唤醒认知 worker
 ```
 
 - Adapter 不判断重要性、不过滤、不合并内容；只做协议归一化。
@@ -510,142 +445,109 @@ QQ 网关
 **B. 状态时钟**
 
 ```text
-Perception.tick(bunny_snapshot, qq_status)     → Perception
-Body.tick(perception, interactions, dt)         → BodyState
-Memory.recent_view()                            → 记忆视图
-SelfState.derive(body, memory_view, now)        → SelfState
-SignalDetector.evaluate(prev, curr)             → [signal Event]
+brain.tick(delta)  # 每 2 秒，由 main 主线程驱动
+  → lifecycle.tick(delta)
+       ├─ environment.tick(snapshot)     → EnvironmentState
+       ├─ body.tick(env, interactions, dt, busy_seconds) → BodyState
+       └─ signals.evaluate(prev, curr)   → [SignalChange]
+  → brain 把 SignalChange 转成 Event(kind="signal") 入队
 ```
 
 - 状态时钟不调用 LLM。
-- `signal` 事件进入收件箱，并作为唤醒理由。
-- `main.py` 每帧把 `{"satiety": ...}` 写入 `bridge` 快照；`Body` 只读它，不另建饱食度计数器。
+- `main.py` 每帧把饱食度写入 `bridge` 快照；`body` 只读它，不另建计数器。
 
 **C. 唤醒与一帧**
 
 ```text
-WakeController.pick_reasons()                   → [reason]
-Mechanism.run_frame(reasons)                    # 认知 worker，单飞
-  → SituationBuilder.build(...)                 → Situation
-  → PromptBuilder.build(situation, schemas)     → messages
-  → LLMClient.chat(messages)                    → raw text
-  → DecisionParser.parse(raw, inbox_ids)        → Decision
-  → Effector.apply(decision)                    → effects
-  → EventLedger.mark_handled(decision.handled)
-  → AlarmStore.schedule(decision.next_wake_in,
-                        decision.wake_when)
+认知 worker 循环（每 0.5 秒）：
+  reasons = lifecycle.due() + _take_pending_reasons()
+  if reasons: brain._run_frame(reasons, unhandled)
+
+_run_frame:
+  → frame_generator.build(reasons, 只读视图)   → 帧（situation + messages）
+  → thinker.run(帧)                            → Decision
+  → executor.apply(decision)                   → effects
+  → event_queue.mark_handled(decision.handled)
+  → (executor 内部) lifecycle.schedule(next_wake_in, wake_when)
 ```
 
-- 帧失败（网络/限流/超时/解析失败）：事件保持 `unhandled`，不写记忆，按 `MAX_IDLE_SECONDS` 兜底，错误写进下一帧情境。
+- 帧失败（网络/限流/超时/解析失败）：事件保持 `unhandled`，不写记忆，错误写进下一帧情境。
 - `next_wake_in` / `wake_when` 只在**终态动作**后生效；`tool.call` 帧由能力结果触发下一帧。
 
 **D. Decision 执行顺序**
 
 ```text
 1. 校验 Decision
-2. remember        → MemoryWorker.enqueue(create_episode)
-3. chat.reply / chat.reach_out → ChatSender → QQClient
+2. remember        → memory worker（create_episode）
+3. chat.reply / chat.reach_out → ChatSender → QQ
 4. tool.call       → CapabilityExecutor
-5. activity.* / activity_update → Activities
-6. rest                         → Body
-7. handled         → EventLedger
-8. next_wake_in / wake_when     → AlarmStore
+5. activity.* / activity_update → ActivityService
+6. handled         → EventQueue
+7. next_wake_in / wake_when     → Lifecycle.schedule
 ```
 
-- 发送失败不回滚记忆；`Effector.last_delivery` 会进入下一帧情境的 `delivery` 字段。
-- 能力异步完成/失败 → `capability_done` / `capability_failed` 事件 → 收件箱 → 下一次唤醒。
+- 发送失败不回滚记忆；`executor.last_delivery` 会进入下一帧情境的 `delivery` 字段。
+- 能力异步完成/失败 → `capability_done` / `capability_failed` 事件 → 事件队列 → 下一次唤醒。
 
 **E. 记忆写入与巩固**
 
 ```text
 remember / memory.write / consolidation
-  → MemoryWorker.enqueue(op)
-       ├─ Store.write(...)          # L2/L3
-       ├─ Index.update(...)         # MEMORY.md
+  → memory worker.enqueue(op)
+       ├─ store.write(...)          # L2/L3
+       ├─ index.update(...)         # MEMORY.md
        └─ 失败重试；持续失败发 system 事件
 ```
 
 - 巩固是独立 LLM 任务：不读写当前回合 L1，不产出 Decision，只提交写操作批次。
-- L1 由情境装配读取；摘要与最近对话同步落盘到 `state/l1.json`，重启时无条件恢复。
+- L1 由情境装配读取；摘要与最近对话同步落盘到 `state/l1.json`。
 
-**F. 休息输出**
-
-```text
-Decision(action=rest)
-  → effector 调用 Body.set_mode("rest")
-  → 状态时钟降低更新频率，最长间隔切到 MAX_IDLE_SECONDS_REST
-```
-
-- 聊天/活动等任何非休息动作恢复 `awake`；`idle` 保持。
-- 身体动画与桌面交互由 pygame 主线程自主处理，不经过 Decision，也没有“身体调用”动作。
-
-**G. 持久化与恢复**
+**F. 持久化与恢复**
 
 ```text
-Mechanism → PersistenceWorker.enqueue(snapshot/ledger/alarms)
-PersistenceWorker → events.jsonl / alarms.json / activities.json
+event_queue / lifecycle / activity / body 各自原子写盘
+（.tmp + os.replace）
 
 启动：
-  加载账本与闹钟
+  加载账本、闹钟、身体状态
   → 活动 active 恢复为 paused
   → 在途能力标记 unknown
-  → 第一帧情境带 system 事件“上次退出/恢复”
+  → 第一帧情境带 system 事件“启动/恢复”
 ```
 
-- 记忆由 `MemoryWorker` 自己落盘，不经过持久化 worker。
+- 记忆由 memory worker 自己落盘，不经过独立持久化 worker。
 - 审计日志由 `capabilities/audit.py` 追加，不参与恢复。
 
 ### 6.5 线程、队列与状态所有权
 
 | 线程 | 拥有者 | 入口 | 出口 |
 | --- | --- | --- | --- |
-| pygame 主线程 | `main.py` / `World` | pygame 事件 | 渲染、`bridge` 快照、`brain.tick` |
+| pygame 主线程 | `main.py` | pygame 事件 | 渲染、`bridge` 快照、`brain.tick` |
 | QQ 接收线程 | `bot/qq_client.py` | WebSocket | 原始 dispatch → `qq_adapter` |
-| 认知 worker | `mechanism` + `cognition` | 唤醒信号 | Decision → `effector` |
-| 能力 worker 池 | `capabilities/executor.py` | 能力队列 | `capability_done/failed` 事件 |
-| L1 压缩 worker | `memory/compression.py` | L1 超限通知 | 摘要 + `MemoryWriteOp` |
-| 巩固 worker | `memory/consolidation.py` | 巩固队列 | `MemoryWriteOp` 批次 |
+| 认知 worker | `brain` + `thinker` | 唤醒信号 | Decision → `executor` |
+| 能力执行 | `capabilities/executor.py` | 能力派发 | `capability_done/failed` 事件 |
+| 巩固 worker | `memory/consolidation.py` | 巩固周期 | `MemoryWriteOp` 批次 |
 | 记忆 worker | `memory/worker.py` | 记忆写队列 | L2/L3 与索引落盘 |
-| 持久化 worker | `mechanism/persistence.py` | 持久化队列 | JSON/JSONL |
-| 状态时钟 | `mechanism/clocks.py`（由主线程 tick 驱动） | 定时器 | 感知/身体/自我状态更新 |
 
 | 队列 | 生产者 | 消费者 | 语义 |
 | --- | --- | --- | --- |
-| 收件箱 `inbox` | QQ adapter、能力执行器、活动、闹钟、信号 | 情境装配 | 只追加；`unhandled/handled` |
-| 能力队列 | `effector` | 能力 worker | 异步调用 |
-| 记忆写队列 | `effector`、`memory_api`、L1 压缩、巩固 worker | 记忆 worker | 串行、有序 |
-| 持久化队列 | `mechanism` | 持久化 worker | 快照/账本 |
-| 巩固队列 | `mechanism` | 巩固 worker | 周期任务 |
-| 唤醒信号 | adapter、闹钟、信号、时钟 | `mechanism` | 合并后的唤醒 |
+| 事件账本 `event_queue` | QQ adapter、能力执行器、活动、闹钟、信号 | 情境装配 | 只追加；`unhandled/handled` |
+| 记忆写队列 | executor、memory_api、L1 压缩、巩固 worker | 记忆 worker | 串行、有序 |
+| 唤醒信号 `_pending_reasons` | adapter、闹钟、信号、时钟 | 认知 worker | 合并后的唤醒 |
 
 状态所有权：
 
 | 状态 | 拥有者 | 只读者 |
 | --- | --- | --- |
-| `Perception` | perception | situation |
+| `EnvironmentState` | environment | situation |
 | `BodyState` | body | self_state、situation |
 | `SelfState` | self_state（派生，不落盘） | situation |
 | L1 | memory | situation |
 | L2/L3 | memory worker | memory / situation（索引） |
-| 事件与账本 | mechanism/events | situation |
-| 活动 | activities | situation、effector（通过动作） |
-| 闹钟 | mechanism/alarms | situation |
-| Decision | cognition（瞬态） | effector |
-
-### 6.6 现有文件调整（单 Alice）
-
-| 文件 | 调整 |
-| --- | --- |
-| `constants/constants.py` | 删除 `BUNNY_MAX_NUM`、`BUNNY_NAME_LIST`；新增 `ALICE_NAME = "Alice"` |
-| `main.py` | 使用单个 `self.bunny`；删除添加/移除/随机命名；托盘与存档只针对 Alice；存档写 `{"satiety": ...}`，读取兼容旧 `{name: {"satiety": ...}}` |
-| `components/bunny.py` | 构造函数去掉 `name` 参数；身体不再持有实例名 |
-| `bot/bridge.py` | 快照改为单只：`set_bunny_snapshot` / `get_bunny_snapshot`；不再保留命令队列 |
-| `bot/qq_client.py` | 所有消息交给 `bot/qq_adapter.py` → Brain，不再有本地命令分支 |
-| `manager/chat_manager.py` | 已删除；对话统一走认知循环 |
-| `bot/dispatcher.py` | 已删除；不再提供 `/help`、`/echo`、`/feed`、`/status` |
-| `README.md` | 单 Alice、记忆与架构入口同步 |
-
-大脑各层按 §10 的 Phase 顺序填充完毕；当前运行路径由 `main.py` + `qq_client.py` + `qq_adapter.py` + `manager/brain.py` 组成。
+| 事件与账本 | event_queue | situation |
+| 活动 | activity | situation、executor（通过动作） |
+| 闹钟 | lifecycle | situation |
+| Decision | thinker（瞬态） | executor |
 
 ---
 
@@ -666,25 +568,25 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 }
 ```
 
-- `arrived_during` 标出"这条消息是在 Alice 忙什么时追加的"，帮助 LLM 理解为补充或纠正。
+- `arrived_during` 标出"这条消息是在 Alice 忙什么时追加的"。
 - 事件只被追加，不被机制删除；状态由 LLM 在 Decision 的 `handled` 中标记。
 
 | `kind` | `payload` 最小字段 | 产生者 |
 | --- | --- | --- |
-| `message` | `{text, msg_id?, at}` | `qq_adapter` |
-| `capability_done` | `{call_id, capability, ok: true, result_summary, result_ref?}` | `capability/executor` |
-| `capability_failed` | `{call_id, capability, ok: false, error, reason, detail}` | `capability/executor` |
-| `activity_checkpoint` | `{activity_id, kind, progress, steps_used, reason}` | `activities` / `mechanism` |
-| `alarm` | `{alarm_id, type, fired_at, detail}` | `mechanism/alarms` |
-| `signal` | `{signal, from, to, detail}` | `mechanism/signals` |
-| `system` | `{event, detail}`（启动、关闭、异常、网关、休眠恢复） | 各模块 |
+| `message` | `{text, msg_id?, conversation_type?}` | `qq_adapter` |
+| `capability_done` | `{call_id, capability, ok: true, result_summary, result_ref?}` | `capabilities/executor` |
+| `capability_failed` | `{call_id, capability, ok: false, error, reason, detail}` | `capabilities/executor` |
+| `activity_checkpoint` | `{activity_id, kind, progress, steps_used, reason}` | `activity` / `brain` |
+| `alarm` | `{alarm_id, type, fired_at}` | `lifecycle` |
+| `signal` | `{signal, from, to}` | `lifecycle/signals` |
+| `system` | `{event}`（启动、关闭、异常、能力结果） | `brain` |
 
 ### 7.2 决策信封
 
 ```json
 {
   "action": "chat.reply",
-  "target": {"friend_id": "u_123", "conversation_id": "c_123"},
+  "target": {"friend_id": "u_123", "conversation_id": "c_123", "conversation_type": "c2c"},
   "args": {},
   "calls": [],
   "activity_update": null,
@@ -700,12 +602,26 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 }
 ```
 
+动作空间（9 个）：
+
+| 动作 | 含义 | 终态 |
+| --- | --- | --- |
+| `tool.call` | 调用一个或多个能力，结果下一帧返回 | 否 |
+| `chat.reply` | 回复某个会话 | 是 |
+| `chat.reach_out` | 主动联系某位朋友 | 是 |
+| `activity.start` | 开始一段持续活动 | 是 |
+| `activity.pause` | 暂停当前活动；`args.resume_when` 可选 | 是 |
+| `activity.resume` | 继续当前活动 | 是 |
+| `activity.complete` | 结束当前活动并标记完成 | 是 |
+| `activity.abandon` | 结束当前活动；`args.outcome` 为 `completed`/`abandoned` | 是 |
+| `idle` | 什么都不做；`next_wake_in`/`wake_when` 可选 | 是 |
+
 - 工具调用使用 `action: "tool.call"` 与 `calls`；结果以事件返回，触发下一帧。
 - 终态动作不再携带工具调用。
-- `next_wake_in` / `wake_when` 只在**终态动作**后生效；`tool.call` 帧不排闹钟，下一帧由 `capability_done/failed` 触发，`0` 表示立即继续。
-- `idle` 的 `next_wake_in` / `wake_when` 可选：填了表示主动预约下一次醒来；都不填则只靠事件与最长间隔唤醒。
-- `activity.pause` 的 `args.resume_when` 可选：暂停时约定的恢复条件，满足时只产生 `alarm` 事件并唤醒，不自动恢复；白名单见 [04-activities §3.3.1](design/04-activities.md#331-resume_when暂停时约好回来的条件)。
-- `remember` 在任意帧都可以提交；写入的是这一帧发生的经历，不是整段回合的总结。
+- `next_wake_in` / `wake_when` 只在**终态动作**后生效；`tool.call` 帧不排闹钟，下一帧由 `capability_done/failed` 触发。
+- `idle` 的 `next_wake_in` / `wake_when` 可选：填了表示主动预约下一次醒来；都不填则只靠事件与定期心跳唤醒。
+- `activity.pause` 的 `args.resume_when` 可选：满足时只产生 `alarm` 事件并唤醒，不自动恢复。
+- `remember` 在任意帧都可以提交；写入的是这一帧发生的经历。
 - `activity_update` 只对活动帧有意义；没有当前活动时忽略。
 
 ### 7.3 状态与记忆写入
@@ -714,46 +630,35 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 - **记忆**：LLM 通过 `remember` 或 `memory.*` 能力决定写什么；所有写入经 memory worker 串行落盘与更新索引。
 - **活动**：由活动模块持久化；LLM 通过 `activity.*` 动作改变其状态。
 
-记忆 worker 接受统一写操作：
-
-```json
-{
-  "op": "create_episode | update_semantic | update_index | archive",
-  "target": "episodes/2026-10-20-u123-想学编程.md",
-  "content": "……",
-  "metadata": {
-    "speaker": "u_123",
-    "conversation": "c_123",
-    "time": "2026-10-20T21:03:11+08:00",
-    "valence": 0.6,
-    "emotion": "开心",
-    "arousal": 0.4
-  }
-}
-```
-
-- `create_episode`：新建 L2；`target` 由机制生成，LLM 不负责文件名。
-- `update_semantic`：更新 `self.md` / `goals.md` / `preferences.md` / `friends/<id>.md`。
-- `update_index`：由 worker 在 L2/L3 写入后自动追加，不需要 LLM 单独提交。
-- `archive`：把低价值条目移出索引，文件保留。
-
 持久化文件：
 
 | 文件 | 格式 | 内容 |
 | --- | --- | --- |
-| `l1.json` | JSON 对象 | L1 摘要与最近对话；每次变化原子写，启动时恢复 |
+| `l1.json` | JSON 对象 | L1 摘要与最近对话；每次变化原子写 |
+| `body.json` | JSON 对象 | 身体状态 |
 | `events.jsonl` | 一行一个 Event | 事件账本；追加写 |
 | `alarms.json` | JSON 数组 | 时间闹钟与条件闹钟 |
 | `activities.json` | JSON 数组 | 活动记录 |
+| `pending_capabilities.json` | JSON 数组 | 在途能力（崩溃恢复用） |
 | `audit.jsonl` | 一行一次调用 | 能力审计 |
 | `MEMORY.md` / `episodes/` / `friends/` | Markdown + frontmatter | 记忆 |
 
 ### 7.4 唤醒契约
 
+唤醒理由 `WakeReason.kind` 有五种：
+
+| kind | 来源 | 说明 |
+| --- | --- | --- |
+| `event` | 消息 / 能力结果 / 活动检查点 / 系统事件 | 事件一律唤醒 |
+| `alarm` | `next_wake_in` 到点 / `wake_when` 条件满足 / 活动恢复条件 | LLM 自定 |
+| `signal` | 身体/环境显著变化 | 机制检测，只报告变化 |
+| `startup` | 启动 | 第一帧 |
+| `periodic` | `periodic_wake_seconds`（1800s） | 兜底心跳 |
+
 - 机制可以"叫醒"认知，但不能决定认知醒后做什么。
-- 唤醒理由写入 `wake_reasons`，每条只陈述事实；单原因时数组长度为 1。
-- 事件优先级高于闹钟与最长间隔；事件永远可以提前唤醒。
-- 详细规则见 [07-mechanism](design/07-mechanism.md)。
+- 唤醒理由只陈述事实；单原因时数组长度为 1。
+- 事件永远可以提前唤醒。
+- 详细规则见 [06-lifecycle](design/06-lifecycle.md)。
 
 ---
 
@@ -761,13 +666,12 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 
 | 阶段 | 发生什么 |
 | --- | --- |
-| **启动** | 加载 L0/L3、恢复活动与事件账本、初始化身体与感知、启动线程、进入空闲 |
-| **空闲** | 只跑状态时钟；按唤醒策略偶尔调用 LLM；可以做身体小动作 |
+| **启动** | 加载 L0/L3、恢复活动与事件账本、初始化身体与环境、启动线程、触发 STARTUP 帧 |
+| **空闲** | 只跑状态时钟；按唤醒策略偶尔调用 LLM |
 | **对话** | 消息触发帧；LLM 决定回复、忽略或继续等待；回合结束后回到空闲/活动 |
 | **活动** | 活动按检查点推进；消息可插入；LLM 决定暂停、继续或放弃 |
-| **睡眠** | LLM 选择 `rest`；降低状态更新频率，最长间隔放宽到 2 小时；事件仍可唤醒 |
-| **关闭** | 停止接收、保存活动/账本/记忆、等待在途任务或取消 |
-| **崩溃恢复** | 从持久化恢复事件账本与闹钟；`active` 活动恢复为 `paused`；在途工具任务标记 `unknown`，由 LLM 决定是否重试 |
+| **关闭** | 停止接收、保存身体/活动/账本/记忆、等待在途任务或取消 |
+| **崩溃恢复** | 从持久化恢复事件账本、闹钟、身体；`active` 活动恢复为 `paused`；在途能力标记 `unknown` |
 
 ---
 
@@ -779,37 +683,21 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 4. **聊天不是全部。** 没有消息时，Alice 依然有生活。
 5. **沉默是合法输出。** 不回应、不行动都是选择。
 6. **不要让长任务卡住意识。** 能力异步执行，帧保持短。
-7. **不要用成本限制表达。** 机制不做 token 或调用次数预算，回复长短、活动多少、何时醒来都由 LLM 判断。
-8. **不设权限裁剪。** Alice 可以访问整台电脑；隐私只约束记忆写入，不约束探索。
+7. **不要用成本限制表达。** 机制不做 token 或调用次数预算。
+8. **不设权限裁剪。** Alice 可以访问整台电脑；隐私只约束记忆写入。
 9. **记忆不参与控制流。** 它只影响 LLM 看到什么、怎么理解。
 10. **人格从记忆生长。** L0 只给身份、气质与边界，不写死喜好与台词。
 11. **唤醒不是决策。** 唤醒策略只决定"何时叫醒"，不决定"醒来做什么"。
 12. **单一大脑。** 不并行思考；不同会话共享同一个意识。
-13. **行为不排序。** 聊天、探索、创作、思考、休息在机制眼里没有优先级；不要给某一类动作开特殊通道。
+13. **行为不排序。** 聊天、探索、创作、思考在机制眼里没有优先级。
 
 ---
 
-## 10. 实施顺序
-
-| Phase | 内容 | 验收标准 |
-| --- | --- | --- |
-| 0 | 认知循环 + 收件箱 + 情境装配 + 唤醒策略 + `chat.reply` / `idle`；填充 §6 的 `brain` / `mechanism` / `cognition` / `effector` 骨架 | 一条消息进来，LLM 决定回不回；无消息时按最长间隔醒来 |
-| 1 | 事件账本 + 会话/说话人分离 + 多消息聚合与拆分 | 连发三条按顺序理解；不同朋友的会话彼此独立；未处理事件不丢 |
-| 2 | 感知 + 身体 + 自我状态 + 记忆索引与 `memory.recall` + `remember` | 重启后记得朋友；情绪与欲望出现在情境并被使用 |
-| 3 | 活动模型 + 后台任务 + `next_wake_in` / `wake_when` + 持久化 | Alice 能开始、暂停、恢复一段探索 |
-| 4 | `fs.*` + `pc.observe` + `sandbox.run` + 审计 | 能读写整台电脑、执行代码，且每次调用可追溯 |
-| 5 | `web.search` / `web.fetch` + `learn` / `reflect` / `create` | 能上网查资料、整理成记忆、之后分享 |
-| 6 | `rest` + 睡眠/昼夜 + `chat.reach_out` | 深夜会休息；会主动找朋友 |
-| 7 | 流式输出 | 长回答可以边说边发 |
-| 8 | 巩固循环 + 关系成长 + 长期目标 | 关系档案随经历更新；人格变化可观察 |
-
----
-
-## 11. 术语表
+## 10. 术语表
 
 | 术语 | 含义 |
 | --- | --- |
-| **事件 event** | 世界中发生的离散事情，进入收件箱 |
+| **事件 event** | 世界中发生的离散事情，进入事件队列 |
 | **唤醒 wake** | 机制调用认知的时机 |
 | **帧 frame** | 一次 LLM 调用与决策 |
 | **回合 turn** | 为同一意图服务的一串帧 |
@@ -818,8 +706,7 @@ PersistenceWorker → events.jsonl / alarms.json / activities.json
 | **决策 decision** | LLM 输出的结构化动作 |
 | **欲望 urge** | 由身体与记忆派生的需求强度，仅作输入 |
 | **能力 capability** | 可调用的工具 |
-| **机制 mechanism** | 非决策性的生命维持基础设施 |
+| **生命循环 lifecycle** | 非决策性的生命维持基础设施 |
 | **artifact** | 大结果的磁盘引用；情境只带摘要与 ref |
-| **唤醒理由 wake reason** | 机制叫醒 Alice 的事实原因，例如新消息、闹钟、显著变化 |
-| **稳定窗口 settle window** | 连珠炮消息合并为一次唤醒的短等待 |
+| **唤醒理由 wake reason** | 机制叫醒 Alice 的事实原因 |
 | **记忆 worker** | 串行执行所有 L2/L3 与索引写入的线程 |

@@ -23,7 +23,7 @@ from typing import Any
 
 JSON = dict[str, Any]
 
-#: 交给 LLM 的情境报告。由 ``cognition/situation.py`` 装配成文档里的 JSON 形状；
+#: 交给 LLM 的情境报告。由 ``frame_generator/situation.py`` 装配成文档里的 JSON 形状；
 #: 这里用类型别名而不是 dataclass，避免把“情境长什么样”锁死在共享层。
 Situation = dict[str, Any]
 
@@ -100,8 +100,6 @@ class Action(StrEnum):
     ACTIVITY_RESUME = "activity.resume"
     ACTIVITY_COMPLETE = "activity.complete"
     ACTIVITY_ABANDON = "activity.abandon"
-    EAT = "eat"
-    REST = "rest"
     IDLE = "idle"
 
 
@@ -115,8 +113,6 @@ TERMINAL_ACTIONS: frozenset[Action] = frozenset(
         Action.ACTIVITY_RESUME,
         Action.ACTIVITY_COMPLETE,
         Action.ACTIVITY_ABANDON,
-        Action.EAT,
-        Action.REST,
         Action.IDLE,
     }
 )
@@ -137,11 +133,6 @@ class ActivityOutcome(StrEnum):
     ABANDONED = "abandoned"
 
 
-class BodyMode(StrEnum):
-    AWAKE = "awake"
-    REST = "rest"
-
-
 class ConversationType(StrEnum):
     C2C = "c2c"
     GROUP = "group"
@@ -159,9 +150,9 @@ class RelationLevel(StrEnum):
 class WakeReasonKind(StrEnum):
     EVENT = "event"
     ALARM = "alarm"
-    MAX_IDLE = "max_idle"
     SIGNAL = "signal"
     STARTUP = "startup"
+    PERIODIC = "periodic"
 
 
 class AlarmKind(StrEnum):
@@ -182,11 +173,10 @@ class WakePredicateType(StrEnum):
 class SignalName(StrEnum):
     SATIETY = "satiety"
     ENERGY = "energy"
-    ALERTNESS = "alertness"
     SOCIAL_BATTERY = "social_battery"
     CIRCADIAN = "circadian"
     PRESENCE = "presence"
-    FOREGROUND_APP = "foreground_app"
+    FOREGROUND_TITLE = "foreground_title"
 
 
 class CapabilityErrorCode(StrEnum):
@@ -243,7 +233,7 @@ ACTIVITY_KINDS: dict[str, tuple[str, ...]] = {
 }
 
 
-#: v1 条件闹钟谓词及其必填参数。见 07-mechanism.md §4.2。
+#: v1 条件闹钟谓词及其必填参数。见 06-lifecycle.md §3.2。
 WAKE_PREDICATE_ARGS: dict[WakePredicateType, frozenset[str]] = {
     WakePredicateType.SATIETY_BELOW: frozenset({"value"}),
     WakePredicateType.ENERGY_BELOW: frozenset({"value"}),
@@ -549,17 +539,16 @@ class BunnySnapshot(DataModel):
 
 
 @dataclass
-class Perception(DataModel):
+class EnvironmentState(DataModel):
     now: datetime
     idle_seconds: float | None = None
     someone_present: bool | None = None
-    foreground_app: str | None = None
+    foreground_title: str | None = None
     at_night: bool = False
-    qq_connected: bool = False
     system_state: JSON = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Perception:
+    def from_dict(cls, data: Mapping[str, Any]) -> EnvironmentState:
         now = data.get("now")
         if not isinstance(now, datetime):
             now = datetime.fromisoformat(str(now))
@@ -567,9 +556,8 @@ class Perception(DataModel):
             now=now,
             idle_seconds=data.get("idle_seconds"),
             someone_present=data.get("someone_present"),
-            foreground_app=data.get("foreground_app"),
+            foreground_title=data.get("foreground_title"),
             at_night=bool(data.get("at_night", False)),
-            qq_connected=bool(data.get("qq_connected", False)),
             system_state=dict(data.get("system_state") or {}),
         )
 
@@ -578,22 +566,18 @@ class Perception(DataModel):
 class BodyState(DataModel):
     satiety: float
     energy: float
-    alertness: float
     social_battery: float
     circadian: float
     presence: bool
-    mode: BodyMode = BodyMode.AWAKE
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> BodyState:
         return cls(
             satiety=float(data.get("satiety", 0.0)),
             energy=float(data.get("energy", 0.0)),
-            alertness=float(data.get("alertness", 0.0)),
             social_battery=float(data.get("social_battery", 0.0)),
             circadian=float(data.get("circadian", 0.0)),
             presence=bool(data.get("presence", False)),
-            mode=_coerce_enum(BodyMode, data.get("mode"), BodyMode.AWAKE),
         )
 
 
@@ -806,7 +790,7 @@ class CapabilityResult(DataModel):
         )
 
     def to_dict(self) -> JSON:
-        """按 05-capabilities.md 的成功/失败信封输出，不带无关空字段。"""
+        """按 04-capabilities.md 的成功/失败信封输出，不带无关空字段。"""
         if self.ok:
             payload: JSON = {
                 "ok": True,
@@ -1135,7 +1119,6 @@ __all__ = [
     "TERMINAL_ACTIONS",
     "ActivityStatus",
     "ActivityOutcome",
-    "BodyMode",
     "ConversationType",
     "RelationLevel",
     "WakeReasonKind",
@@ -1160,7 +1143,7 @@ __all__ = [
     "AlarmPredicate",
     "Decision",
     "BunnySnapshot",
-    "Perception",
+    "EnvironmentState",
     "BodyState",
     "Urge",
     "Attitude",

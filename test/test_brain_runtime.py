@@ -1,0 +1,525 @@
+"""模拟 Brain 真实运行环境的行为测试。
+
+不依赖真实 LLM / QQ 网关 / 桌宠本体：用 FakeLLM 脚本化决策、FakeTransport 记录发送、
+临时目录隔离磁盘状态，驱动 Brain 走完 new_brain.md 的核心闭环，验证重构后的行为
+逻辑没有重大偏差。
+
+覆盖：
+  - 启动 + 被动回复（chat.reply）
+  - tool.call 多帧（同步能力 → CAPABILITY_DONE → 终态回复）
+  - eat 能力（桌宠主线程进食请求）
+  - chat.reach_out 主动搭话
+  - activity 生命周期（start / complete）
+  - 闹钟唤醒（next_wake_in → 到期 → 二次帧）
+  - 待机 idle 终态（静默 + next_wake_in 再唤醒）
+  - 事件账本与活动的持久化 / 重载
+
+运行：
+  python -m test.test_brain_runtime            # 简洁输出
+  python -m test.test_brain_runtime -v         # 附带 brain 的帧日志（验证日志追踪）
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import sys
+import tempfile
+import time
+from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from bot.qq_adapter import QQAdapter
+from manager.brain import Brain
+from manager.shared.config import BrainPaths
+from manager.shared.types import ActivityStatus
+
+_FENCE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
+
+
+class Clock:
+    """可控时钟：默认固定，避免定期唤醒/时间流逝干扰测试。"""
+
+    def __init__(self, start: datetime | None = None):
+        self._now = start or datetime(2026, 10, 24, 12, 0, 0).astimezone()
+
+    def now(self) -> datetime:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += timedelta(seconds=seconds)
+
+
+def _situation(messages) -> dict:
+    user = messages[-1]["content"] if messages else ""
+    match = _FENCE.search(user)
+    if not match:
+        return {}
+    try:
+        return json.loads(match.group(1))
+    except ValueError:
+        return {}
+
+
+def _message_event(situation: dict) -> dict:
+    for event in situation.get("inbox", []):
+        if event.get("kind") == "message":
+            return event
+    raise AssertionError("inbox 里没有 message 事件")
+
+
+def _target_from(event: dict) -> dict:
+    return {
+        "friend_id": event["friend_id"],
+        "conversation_id": event["conversation_id"],
+        "conversation_type": event.get("conversation_type", "c2c"),
+    }
+
+
+class FakeLLM:
+    """脚本化 LLM：认知帧按脚本顺序出决策；记忆整理类 prompt 返回空操作。"""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = []
+
+    def chat(self, messages, timeout=None, temperature=None):
+        self.calls.append(list(messages))
+        system = messages[0]["content"] if messages else ""
+        if "记忆整理程序" in system:
+            return '{"operations": []}'
+        if not self.script:
+            raise AssertionError("FakeLLM 脚本耗尽（多出一次认知帧）")
+        item = self.script.pop(0)
+        return (
+            item(messages)
+            if callable(item)
+            else json.dumps(item, ensure_ascii=False)
+        )
+
+
+class FakeTransport:
+    """记录 Alice 发出的消息，替代 QQ REST 发送。"""
+
+    def __init__(self):
+        self.sent = []
+
+    def send_c2c_message(self, conversation_id, msg_id, content, msg_type=0):
+        self.sent.append(
+            {
+                "kind": "c2c",
+                "to": conversation_id,
+                "msg_id": msg_id,
+                "text": content,
+                "msg_type": msg_type,
+            }
+        )
+        return True
+
+    def send_group_message(self, conversation_id, msg_id, content, msg_type=0):
+        self.sent.append(
+            {
+                "kind": "group",
+                "to": conversation_id,
+                "msg_id": msg_id,
+                "text": content,
+                "msg_type": msg_type,
+            }
+        )
+        return True
+
+
+def make_brain(tmpdir, llm, transport, *, eat_handler=None, clock=None):
+    clock = clock or Clock()
+    return Brain(
+        paths=BrainPaths(root=tmpdir),
+        llm=llm,
+        transport=transport,
+        snapshot_getter=lambda: {"satiety": 80.0},
+        eat_handler=eat_handler,
+        now_fn=clock.now,
+        enable_logging=False,
+    )
+
+
+def wait_until(predicate, timeout=8.0, interval=0.02):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
+def wait_startup(brain, llm, transport):
+    """等启动帧落地（首个 reach_out 发出），随后清空发送记录，隔离启动噪声。"""
+    assert wait_until(lambda: transport.sent), "启动帧未在时限内完成"
+    transport.sent.clear()
+
+
+# ---------------------------------------------------------------------------
+# 脚本化决策工厂（每个返回 (messages) -> decision_json）
+# ---------------------------------------------------------------------------
+def _startup_decision(messages):
+    """启动帧：向占位好友主动搭话并处理掉 startup 系统事件，结束该帧。"""
+    sit = _situation(messages)
+    return json.dumps(
+        {
+            "action": "chat.reach_out",
+            "target": {
+                "friend_id": "u_startup",
+                "conversation_id": "u_startup",
+                "conversation_type": "c2c",
+            },
+            "args": {"text": "（启动）"},
+            "handled": [e["id"] for e in sit.get("inbox", [])],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _reply(text):
+    def _fn(messages):
+        sit = _situation(messages)
+        event = _message_event(sit)
+        return json.dumps(
+            {
+                "action": "chat.reply",
+                "target": _target_from(event),
+                "args": {"text": text},
+                "handled": [e["id"] for e in sit.get("inbox", [])],
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _tool_call(capability, args=None):
+    def _fn(messages):
+        return json.dumps(
+            {
+                "action": "tool.call",
+                "calls": [{"capability": capability, "args": args or {}}],
+                "handled": [],
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _reach_out(text, friend_id="u_123"):
+    def _fn(messages):
+        sit = _situation(messages)
+        event = next(
+            (e for e in sit.get("inbox", []) if e.get("kind") == "message"), None
+        )
+        target = (
+            _target_from(event)
+            if event
+            else {
+                "friend_id": friend_id,
+                "conversation_id": friend_id,
+                "conversation_type": "c2c",
+            }
+        )
+        return json.dumps(
+            {
+                "action": "chat.reach_out",
+                "target": target,
+                "args": {"text": text},
+                "handled": [e["id"] for e in sit.get("inbox", [])],
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _activity_start(kind="learn", goal="了解 Python 装饰器"):
+    def _fn(messages):
+        sit = _situation(messages)
+        return json.dumps(
+            {
+                "action": "activity.start",
+                "args": {"kind": kind, "goal": goal},
+                "handled": [e["id"] for e in sit.get("inbox", [])],
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _activity_complete(summary="学会了"):
+    def _fn(messages):
+        sit = _situation(messages)
+        return json.dumps(
+            {
+                "action": "activity.complete",
+                "args": {"summary": summary},
+                "handled": [e["id"] for e in sit.get("inbox", [])],
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _reply_with_alarm(text, next_wake_in):
+    def _fn(messages):
+        sit = _situation(messages)
+        event = _message_event(sit)
+        return json.dumps(
+            {
+                "action": "chat.reply",
+                "target": _target_from(event),
+                "args": {"text": text},
+                "handled": [e["id"] for e in sit.get("inbox", [])],
+                "next_wake_in": next_wake_in,
+            },
+            ensure_ascii=False,
+        )
+
+    return _fn
+
+
+def _idle(next_wake_in=None):
+    def _fn(messages):
+        sit = _situation(messages)
+        decision = {
+            "action": "idle",
+            "handled": [e["id"] for e in sit.get("inbox", [])],
+        }
+        if next_wake_in is not None:
+            decision["next_wake_in"] = next_wake_in
+        return json.dumps(decision, ensure_ascii=False)
+
+    return _fn
+
+
+# ---------------------------------------------------------------------------
+# 测试用例
+# ---------------------------------------------------------------------------
+def test_passive_reply(tmpdir):
+    llm = FakeLLM([_startup_decision, _reply("你好呀，我在的。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "你好")
+        assert wait_until(
+            lambda: any(m["text"] == "你好呀，我在的。" for m in transport.sent)
+        ), "被动回复未发出"
+        sent = next(m for m in transport.sent if m["text"] == "你好呀，我在的。")
+        assert sent["msg_id"] == "m_1", "被动回复应带来信 msg_id"
+        assert sent["kind"] == "c2c"
+        assert "你好呀，我在的。" in brain.memory.recent_context(), "回复未写入 L1"
+        assert not brain.events.unhandled(), "消息事件应已标记处理"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_tool_call_then_reply(tmpdir):
+    llm = FakeLLM(
+        [_startup_decision, _tool_call("time.now"), _reply("查好了。")]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "现在几点")
+        assert wait_until(
+            lambda: any(m["text"] == "查好了。" for m in transport.sent)
+        ), "tool.call 后未回复"
+        assert len(llm.calls) >= 3, "应有 启动 + tool.call + 终态回复 三次认知帧"
+        records = brain.audit.tail(20)
+        assert any(r["capability"] == "time.now" for r in records), "time.now 未审计"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_eat_capability(tmpdir):
+    eaten = []
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            _tool_call("eat", {"food": "胡萝卜"}),
+            _reply("吃饱了。"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(
+        tmpdir,
+        llm,
+        transport,
+        eat_handler=lambda food: eaten.append(food) or True,
+    )
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "饿了")
+        assert wait_until(lambda: eaten == ["胡萝卜"]), "eat 能力未触发进食"
+        assert wait_until(
+            lambda: any(m["text"] == "吃饱了。" for m in transport.sent)
+        ), "eat 之后的终态回复未发出"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_reach_out(tmpdir):
+    llm = FakeLLM([_startup_decision, _reach_out("突然想起你了。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "在吗")
+        assert wait_until(
+            lambda: any(m["text"] == "突然想起你了。" for m in transport.sent)
+        ), "reach_out 未发出"
+        sent = next(m for m in transport.sent if m["text"] == "突然想起你了。")
+        assert sent["msg_id"] is None, "reach_out 应不带 msg_id（主动消息）"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_activity_lifecycle(tmpdir):
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            _activity_start("learn", "了解 Python 装饰器"),
+            _activity_complete("学会了"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "开始学习吧")
+        assert wait_until(lambda: brain.activities.active() is not None), "活动未开始"
+        act = brain.activities.active()
+        assert act.kind == "learn" and act.goal == "了解 Python 装饰器"
+
+        QQAdapter(brain).submit_c2c("u_123", "m_2", "学完了")
+        assert wait_until(lambda: brain.activities.active() is None), "活动未结束"
+        assert (
+            brain.activities.get(act.id).status is ActivityStatus.COMPLETED
+        ), "活动状态应为 completed"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_alarm_wake(tmpdir):
+    clock = Clock()
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            _reply_with_alarm("待会儿再聊", next_wake_in=1),
+            _reach_out("时间到了。"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "先忙")
+        assert wait_until(
+            lambda: any(m["text"] == "待会儿再聊" for m in transport.sent)
+        ), "首次回复未发出"
+        clock.advance(2.0)
+        assert wait_until(
+            lambda: any(m["text"] == "时间到了。" for m in transport.sent)
+        ), "闹钟唤醒未触发二次帧"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_idle(tmpdir):
+    clock = Clock()
+    llm = FakeLLM(
+        [_startup_decision, _idle(next_wake_in=1), _reach_out("刚才没想说啥。")]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_c2c("u_123", "m_1", "在吗")
+        assert wait_until(lambda: not brain.events.unhandled()), "idle 帧未处理事件"
+        assert transport.sent == [], "idle 不应发出任何消息"
+        clock.advance(2.0)
+        assert wait_until(
+            lambda: any(m["text"] == "刚才没想说啥。" for m in transport.sent)
+        ), "idle 的 next_wake_in 未触发后续唤醒"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_persistence_reload(tmpdir):
+    # 第一次会话：处理一条消息并开始活动，随后模拟进程退出
+    llm = FakeLLM([_startup_decision, _activity_start("learn", "没学完的任务")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport)
+    brain.start()
+    wait_startup(brain, llm, transport)
+    QQAdapter(brain).submit_c2c("u_123", "m_1", "开始学习")
+    assert wait_until(lambda: brain.activities.active() is not None)
+    brain.stop("崩溃模拟")
+
+    # 第二次会话：同一目录重载，活动应恢复为 paused，事件账本应保留
+    llm2 = FakeLLM([_startup_decision])
+    transport2 = FakeTransport()
+    brain2 = make_brain(tmpdir, llm2, transport2)
+    brain2.start()
+    try:
+        paused = brain2.activities.paused()
+        assert paused is not None, "重启后未恢复未完成的活动"
+        assert paused.status is ActivityStatus.PAUSED, "恢复的活动应为 paused"
+        assert brain2.events.all(), "事件账本未持久化"
+    finally:
+        brain2.stop("测试结束")
+
+
+_TESTS = [
+    ("被动回复 chat.reply", test_passive_reply),
+    ("tool.call 多帧", test_tool_call_then_reply),
+    ("eat 能力", test_eat_capability),
+    ("主动搭话 chat.reach_out", test_reach_out),
+    ("活动生命周期", test_activity_lifecycle),
+    ("闹钟唤醒", test_alarm_wake),
+    ("待机 idle 终态", test_idle),
+    ("持久化与重载", test_persistence_reload),
+]
+
+
+def _run():
+    verbose = "-v" in sys.argv or "--verbose" in sys.argv
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    failures = []
+    for name, fn in _TESTS:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                fn(tmpdir)
+                print(f"PASS  {name}")
+            except Exception as exc:  # noqa: BLE001 - 测试脚本汇总失败
+                failures.append((name, exc))
+                print(f"FAIL  {name}: {exc!r}")
+    print(f"\n{len(_TESTS) - len(failures)}/{len(_TESTS)} 通过")
+    if failures:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    _run()

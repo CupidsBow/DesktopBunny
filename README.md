@@ -11,9 +11,9 @@
 - 点击静止状态的 Alice 使其跳跃
 - 点击下蹲状态的 Alice 可以使其变成兔娘（需要 50 以上饱食度）
 - 饱食度（0 - 100）每 216 秒减少一点，拖动文件至 Alice 可喂食恢复饱食度（会销毁文件，不进入回收站）；她也可以自己决定吃点东西
-- 单实例守护：同一时间只运行一个 Bunny 进程，手动重复启动或 Alice 借沙盒命令再次启动自己都会直接退出
+- 单实例守护：同一时间同一名字只运行一个 Bunny 进程，手动重复启动或 Alice 借沙盒命令再次启动自己都会直接退出；不同名字的 exe（`BUNNY_NAME` 不同）可以同时共存
 - 屏幕分辨率 / 工作区尺寸变化时自动退出，重启后适配新尺寸
-- 内置 QQ 机器人：通过 QQ 私聊 / 群 @ 与 Alice 对话
+- 内置 QQ 机器人：通过 QQ 私聊与 Alice 对话
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data 
 
 桌宠启动时会作为 QQ 官方机器人上线：连接官方 WebSocket 网关，只发起点对点出站连接，因此**不需要公网 IP 或内网穿透**。
 
-- 私聊发消息、或群里 @ 机器人，消息会进入 Alice 的认知循环：她会读取当前情境与记忆，自己决定回复、做事、休息还是主动找人
+- 私聊发消息，消息会进入 Alice 的认知循环：她会读取当前情境与记忆，自己决定回复、做事、休息还是主动找人
 - 对话会写入 L1 工作记忆，并保存到 `state/l1.json`，重启后自动恢复；L1 超过上限时，后台用 LLM 把较早的对话压缩成摘要并归档为 L2 情景记忆，不会简单丢弃
 - Alice 可以调用工具（时间、网页、文件、沙盒、电脑观测等），也能自己发起和推进活动
 
@@ -50,7 +50,7 @@ pyinstaller --name Bunny --onefile --windowed --icon=assets/icon.png --add-data 
 在 [q.qq.com](https://q.qq.com) 创建机器人后，需要：
 
 1. 机器人处于上线 / 审核通过状态（未上线则把 `.env` 的 `QQ_IS_SANDBOX` 设为 `true`）
-2. 订阅「单聊消息」「群聊@消息」事件
+2. 订阅「单聊消息」事件
 3. 用自己的 QQ 私聊机器人，或把机器人拉进群并 @ 它
 
 ## 设计文档
@@ -61,18 +61,20 @@ Alice 的大脑设计见 [manager/brain.md](manager/brain.md)。代码目录、�
 
 ## 配置
 
-- 存档保存在 `%LOCALAPPDATA%\Bunny\bunny_save.dat`
+- 所有存档按名字隔离：每个名字一个文件夹 `%LOCALAPPDATA%\Bunny\<名字>\`，里面放大脑记忆（`memory\`、`state\`）、饱食度存档 `bunny_save.dat` 与日志 `app.log`
 - 根目录 `.env` 保存密钥类配置（已加入 .gitignore，模板见 `.env.sample`）：
 
 | 变量 | 说明 |
 | --- | --- |
+| `BUNNY_NAME` | 兔子的名字（默认 `Alice`）；改它可打出不同名字的 exe，异名实例可共存 |
+| `BUNNY_FRIENDS` | 本地兔子朋友的名字，逗号分隔（如 `Bob,Carol`）；启动时预建空朋友档案 |
 | `LLM_API_KEY` | DeepSeek API Key |
 | `LLM_CHAT_URL` | 对话接口地址（默认 `https://api.deepseek.com/chat/completions`） |
 | `LLM_MODEL` | 模型名（如 `deepseek-v4-flash`） |
 | `QQ_APP_ID` | QQ 机器人 AppID |
 | `QQ_APP_SECRET` | QQ 机器人 AppSecret |
 | `QQ_IS_SANDBOX` | `true` 用沙箱环境，`false` 用正式环境 |
-| `QQ_INTENTS` | 订阅事件位掩码，默认 `33554432`（= 群@消息 + 单聊消息） |
+| `QQ_INTENTS` | 订阅事件位掩码，默认 `33554432`（单聊消息；群@事件会被忽略） |
 | `QQ_WORKER_COUNT` | 并发处理消息的 worker 数，默认 `8` |
 
 打包时 `.env` 会随 exe 一起打入。

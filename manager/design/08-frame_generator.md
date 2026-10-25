@@ -46,20 +46,22 @@
     "identity": "Alice",
     "mood": 0.4,
     "mood_label": "轻快",
-    "urges": {"饥饿": 0.7, "孤独": 0.2, "睡意": 0.1}
+    "urge_details": [
+      {"name": "饥饿", "level": 0.7, "reason": "饱食度 62"},
+      {"name": "孤独", "level": 0.2, "reason": "今天还没人说话"}
+    ]
   },
 
   "body": {
-    "satiety": 62, "energy": 0.71,
-    "social_battery": 0.6, "circadian": 0.8,
+    "satiety": "62/100", "energy": "0.71/1",
+    "social_battery": "0.6/1",
     "presence": true
   },
 
   "environment": {
     "someone_present": true,
     "idle_seconds": 42,
-    "foreground_title": "Visual Studio Code",
-    "at_night": false
+    "foreground_title": "Visual Studio Code"
   },
 
   "activity": {
@@ -80,11 +82,11 @@
 
   "inbox": [
     {"id": "ev_91", "kind": "message", "friend_id": "u_123",
-     "conversation_id": "c_123", "text": "在吗",
+     "text": "在吗",
      "arrived_during": {"type": "activity", "id": "act_17"},
      "status": "unhandled"},
     {"id": "ev_92", "kind": "message", "friend_id": "u_123",
-     "conversation_id": "c_123", "text": "上次那篇文章还有吗",
+     "text": "上次那篇文章还有吗",
      "status": "unhandled"}
   ],
 
@@ -95,19 +97,9 @@
     "index": ["……MEMORY.md 的一行（带 valence/arousal）……"]
   },
 
-  "capabilities": ["web.search", "web.fetch",
-                   "fs.read", "fs.list", "memory.recall",
-                   "memory.write", "pc.observe", "time.now"],
-
   "delivery": {
     "last_ok": true,
     "detail": null
-  },
-
-  "constraints": {
-    "periodic_wake_seconds": 1800,
-    "next_wake_max_seconds": 86400,
-    "frame_timeout_seconds": 60
   }
 }
 ```

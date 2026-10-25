@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Iterable, Sequence
+from typing import Iterable
 
 
 def now_local() -> datetime:
@@ -51,27 +51,6 @@ def decay_factor(age_seconds: float, half_life: float) -> float:
     return 0.5 ** (max(0.0, age_seconds) / half_life)
 
 
-def circadian_value(hour: float, curve: Sequence[tuple[float, float]]) -> float:
-    """按控制点线性插值昼夜基线；``hour`` 为 0~24 的浮点数。"""
-    if not curve:
-        return 0.5
-    hour = hour % 24.0
-    points = sorted((float(h), float(v)) for h, v in curve)
-    for (h1, v1), (h2, v2) in zip(points, points[1:]):
-        if h1 <= hour <= h2:
-            if h2 == h1:
-                return v2
-            ratio = (hour - h1) / (h2 - h1)
-            return v1 + (v2 - v1) * ratio
-    if hour < points[0][0]:
-        # 24 点回绕到第一个控制点
-        h1, v1 = points[-1]
-        h2, v2 = points[0][0] + 24.0, points[0][1]
-        ratio = (hour + 24.0 - h1) / (h2 - h1)
-        return v1 + (v2 - v1) * ratio
-    return points[-1][1]
-
-
 def next_occurrence(hhmm: str, now: datetime) -> datetime:
     """返回 ``HH:MM`` 的下一次本地时刻；格式非法时退化为 24 小时后。"""
     try:
@@ -101,13 +80,6 @@ def parse_time_arg(spec: dict, now: datetime) -> datetime | None:
                 return parsed
             return parsed
     return next_occurrence(text, now)
-
-
-def is_night(value: datetime, start_hour: int = 23, end_hour: int = 7) -> bool:
-    hour = value.hour
-    if start_hour <= end_hour:
-        return start_hour <= hour < end_hour
-    return hour >= start_hour or hour < end_hour
 
 
 def age_seconds(then: datetime | None, now: datetime) -> float:

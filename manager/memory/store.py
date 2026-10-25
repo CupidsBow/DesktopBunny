@@ -180,7 +180,6 @@ class MemoryStore:
             "metadata": {
                 "type": "episodic",
                 "speaker": metadata.speaker,
-                "conversation": metadata.conversation,
                 "time": metadata.time,
                 "valence": metadata.valence,
                 "emotion": metadata.emotion,
@@ -307,10 +306,10 @@ class MemoryStore:
     ) -> None:
         front = {
             "name": friend_id,
-            "description": f"（还不了解 {friend_id}。）",
+            "description": f"（还不了解 {friend_id}。有空可以聊聊看）",
             "metadata": {"type": "friend", "first_seen": today, "last_seen": today},
         }
-        content = f"## 印象\n\n（还不了解 {friend_id}。）\n\n## 共同经历\n\n"
+        content = f"## 印象\n\n（还不了解 {friend_id}。有空可以聊聊看）\n\n## 共同经历\n\n"
         self._atomic_write(path, render_frontmatter(front) + "\n" + content)
 
     def read_friend(self, friend_id: str) -> FriendProfile:

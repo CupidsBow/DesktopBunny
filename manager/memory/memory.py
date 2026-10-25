@@ -379,13 +379,11 @@ class Memory:
         remember: Remember,
         *,
         speaker: str | None = None,
-        conversation: str | None = None,
         at: datetime | None = None,
     ) -> str:
         at = at or self.now_fn()
         metadata = MemoryMetadata(
             speaker=speaker,
-            conversation=conversation,
             time=to_iso(at),
             valence=max(-1.0, min(1.0, float(remember.valence))),
             emotion=remember.emotion or "平静",
@@ -405,7 +403,6 @@ class Memory:
         content: str,
         *,
         speaker: str | None = None,
-        conversation: str | None = None,
         valence: float = 0.0,
         emotion: str = "平静",
         arousal: float = 0.0,
@@ -413,7 +410,6 @@ class Memory:
     ) -> str:
         metadata = MemoryMetadata(
             speaker=speaker,
-            conversation=conversation,
             time=to_iso(at or self.now_fn()),
             valence=max(-1.0, min(1.0, float(valence))),
             emotion=emotion or "平静",

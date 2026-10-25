@@ -133,11 +133,6 @@ class ActivityOutcome(StrEnum):
     ABANDONED = "abandoned"
 
 
-class ConversationType(StrEnum):
-    C2C = "c2c"
-    GROUP = "group"
-
-
 class RelationLevel(StrEnum):
     STRANGER = "陌生"
     DISTANT = "疏远"
@@ -174,7 +169,6 @@ class SignalName(StrEnum):
     SATIETY = "satiety"
     ENERGY = "energy"
     SOCIAL_BATTERY = "social_battery"
-    CIRCADIAN = "circadian"
     PRESENCE = "presence"
     FOREGROUND_TITLE = "foreground_title"
 
@@ -261,14 +255,12 @@ RESUME_PREDICATE_ARGS: dict[WakePredicateType, frozenset[str]] = {
 @dataclass
 class EventSource(DataModel):
     friend_id: str | None = None
-    conversation_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any] | None) -> EventSource:
         data = data or {}
         return cls(
             friend_id=data.get("friend_id"),
-            conversation_id=data.get("conversation_id"),
         )
 
 
@@ -338,21 +330,13 @@ class WakeReason(DataModel):
 @dataclass
 class Target(DataModel):
     friend_id: str
-    conversation_id: str
     msg_id: str | None = None
-    conversation_type: ConversationType = ConversationType.C2C
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Target:
         return cls(
             friend_id=str(data.get("friend_id", "")),
-            conversation_id=str(data.get("conversation_id", "")),
             msg_id=data.get("msg_id"),
-            conversation_type=_coerce_enum(
-                ConversationType,
-                data.get("conversation_type"),
-                ConversationType.C2C,
-            ),
         )
 
 
@@ -539,13 +523,55 @@ class BunnySnapshot(DataModel):
 
 
 @dataclass
+class Peer(DataModel):
+    """在线的本地兔子（presence 心跳里的一条）。"""
+
+    name: str
+    slug: str
+    pid: int = 0
+    started_at: str = ""
+    heartbeat_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Peer:
+        return cls(
+            name=str(data.get("name", "")),
+            slug=str(data.get("slug", "")),
+            pid=int(data.get("pid", 0)),
+            started_at=str(data.get("started_at", "")),
+            heartbeat_at=str(data.get("heartbeat_at", "")),
+        )
+
+
+@dataclass
+class PeerMessage(DataModel):
+    """收件箱文件的内容；不是事件，入站时由 brain 转成 MESSAGE 事件。"""
+
+    msg_id: str
+    from_slug: str
+    from_name: str
+    text: str
+    sent_at: str
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PeerMessage:
+        return cls(
+            msg_id=str(data.get("msg_id", "")),
+            from_slug=str(data.get("from_slug", "")),
+            from_name=str(data.get("from_name", "")),
+            text=str(data.get("text", "")),
+            sent_at=str(data.get("sent_at", "")),
+        )
+
+
+@dataclass
 class EnvironmentState(DataModel):
     now: datetime
     idle_seconds: float | None = None
     someone_present: bool | None = None
     foreground_title: str | None = None
-    at_night: bool = False
     system_state: JSON = field(default_factory=dict)
+    peers: list[Peer] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EnvironmentState:
@@ -557,8 +583,8 @@ class EnvironmentState(DataModel):
             idle_seconds=data.get("idle_seconds"),
             someone_present=data.get("someone_present"),
             foreground_title=data.get("foreground_title"),
-            at_night=bool(data.get("at_night", False)),
             system_state=dict(data.get("system_state") or {}),
+            peers=[Peer.from_dict(item) for item in (data.get("peers") or [])],
         )
 
 
@@ -567,7 +593,6 @@ class BodyState(DataModel):
     satiety: float
     energy: float
     social_battery: float
-    circadian: float
     presence: bool
 
     @classmethod
@@ -576,7 +601,6 @@ class BodyState(DataModel):
             satiety=float(data.get("satiety", 0.0)),
             energy=float(data.get("energy", 0.0)),
             social_battery=float(data.get("social_battery", 0.0)),
-            circadian=float(data.get("circadian", 0.0)),
             presence=bool(data.get("presence", False)),
         )
 
@@ -739,14 +763,11 @@ class Capability:
     audit: bool = True
 
     def to_dict(self) -> JSON:
-        """给 prompt / 情境使用的公开描述，不含 handler。"""
+        """给 prompt 使用的公开描述：只含决策所需字段，不含 handler 与机制元数据。"""
         return {
             "name": self.name,
             "description": self.description,
             "schema": self.schema,
-            "async_mode": self.async_mode,
-            "timeout_seconds": self.timeout_seconds,
-            "audit": self.audit,
         }
 
 
@@ -866,7 +887,6 @@ class DeliveryStatus(DataModel):
 @dataclass
 class MemoryMetadata(DataModel):
     speaker: str | None = None
-    conversation: str | None = None
     time: str | None = None
     valence: float = 0.0
     emotion: str = "平静"
@@ -877,7 +897,6 @@ class MemoryMetadata(DataModel):
         data = data or {}
         return cls(
             speaker=data.get("speaker"),
-            conversation=data.get("conversation"),
             time=data.get("time"),
             valence=float(data.get("valence", 0.0)),
             emotion=str(data.get("emotion", "平静")),
@@ -1119,7 +1138,6 @@ __all__ = [
     "TERMINAL_ACTIONS",
     "ActivityStatus",
     "ActivityOutcome",
-    "ConversationType",
     "RelationLevel",
     "WakeReasonKind",
     "AlarmKind",
@@ -1143,6 +1161,8 @@ __all__ = [
     "AlarmPredicate",
     "Decision",
     "BunnySnapshot",
+    "Peer",
+    "PeerMessage",
     "EnvironmentState",
     "BodyState",
     "Urge",

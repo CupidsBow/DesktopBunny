@@ -72,7 +72,6 @@ description: u123 说自己想学编程，问 Alice 推荐什么入门语言
 metadata:
   type: episodic
   speaker: u_123
-  conversation: c_123
   time: 2026-10-20T21:03
   valence: 0.6
   emotion: 开心
@@ -81,7 +80,7 @@ metadata:
 u123 问想学编程，Alice 推荐了 Python，并约好下次一起看教程。
 ```
 
-- `speaker` 是**说话人**，`conversation` 是**会话**，两者分开。
+- `speaker` 是**说话人**，也是会话归属（私聊中即 `user_openid`）。
 - `valence` 是情感痕迹，写入后不修改；`emotion`/`arousal` 用于表达与显著性。
 - 文件名格式：`YYYY-MM-DD-<speaker>-<slug>.md`；slug 由概述截取，冲突时追加 `-2`。
 - `name` 与文件名一致，写入后不变；`remember` 不判断内容是否重复，重复事件由巩固合并。
@@ -200,7 +199,6 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
   "content": "稳定结论或新情景正文",
   "metadata": {
     "speaker": "u_123",
-    "conversation": "c_123",
     "time": "2026-10-20T21:03:11+08:00",
     "valence": 0.6,
     "emotion": "开心",
@@ -256,10 +254,9 @@ LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判�
 
 | 概念 | 字段 | 决定 |
 | --- | --- | --- |
-| 会话 `conversation` | `user_openid` | 对话上下文、收件箱归属 |
-| 说话人 `speaker` | `user_openid` | 情景来源、态度、朋友档案 |
+| 说话人 `speaker` | `user_openid` | 会话归属、情景来源、态度、朋友档案 |
 
-单聊里会话与说话人是同一个人；字段分开保留，便于未来扩展。
+私聊里说话人即会话：一条消息只对应一个 `user_openid`。
 
 ### 7.3 朋友档案
 
@@ -291,7 +288,7 @@ metadata:
 ### 8.1 谁来写
 
 - LLM 通过 Decision 的 `remember` 字段写一条简短情景：`text` 是概述，`valence`/`emotion`/`arousal` 是情感打分。
-- `speaker` / `conversation` 由机制按本帧 `handled` 的消息所属说话人填充；纯活动帧填 `speaker: null`、`conversation: null`；`time` 用帧时间。
+- `speaker` 由机制按本帧 `handled` 的消息所属说话人填充；纯活动帧填 `speaker: null`；`time` 用帧时间。
 - LLM 通过 `memory.write` 能力更新 L3 语义文件。
 - 自动巩固在后台提交 L3 与索引的写操作。
 - 所有写入统一进 memory worker 队列，串行落盘；机制只负责落盘、去重、索引维护，不判断内容价值。

@@ -495,7 +495,7 @@ class Bunny:
         name = (food or "东西").strip()[:40] or "东西"
         self.set_comment(f"嗷呜~{name}好好吃~")
         logger.info(
-            f"{constants.ALICE_NAME} 吃掉了{name}, 现在的饱食度: {self.satiety}"
+            f"{constants.BUNNY_NAME} 吃掉了{name}, 现在的饱食度: {self.satiety}"
         )
         return self.satiety
 

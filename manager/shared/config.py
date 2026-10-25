@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 
 from constants import constants
 
-#: Alice 自己的数据根目录；桌宠存档仍在 DEFAULT_SAVE_DIR 下。
-DEFAULT_BRAIN_DIR = os.path.join(constants.DEFAULT_SAVE_DIR, "Alice")
+#: Alice 自己的数据根目录；按名字隔离，异名兔子各用各的记忆、存档与日志。
+DEFAULT_BRAIN_DIR = constants.BUNNY_DATA_DIR
 
 
 @dataclass(frozen=True)
@@ -132,30 +132,6 @@ DEFAULT_WAKE_DEADBANDS: dict[str, tuple[float, ...]] = {
 }
 
 
-#: 各欲望的基础累积速率（每秒）；实际累积还要乘缺口与昼夜系数。
-DEFAULT_URGE_RATES: dict[str, float] = {
-    "饥饿": 1.0 / 600.0,
-    "孤独": 1.0 / 3600.0,
-    "想念": 1.0 / 7200.0,
-    "分享": 1.0 / 1800.0,
-    "睡意": 1.0 / 3600.0,
-    "日常": 1.0 / 86400.0,
-}
-
-
-#: 昼夜曲线控制点：(小时, 活动基线 0~1)。
-DEFAULT_CIRCADIAN_CURVE: tuple[tuple[float, float], ...] = (
-    (0.0, 0.2),
-    (6.0, 0.3),
-    (9.0, 0.9),
-    (12.0, 0.8),
-    (14.0, 0.85),
-    (18.0, 0.9),
-    (22.0, 0.5),
-    (24.0, 0.2),
-)
-
-
 @dataclass(frozen=True)
 class BrainConfig:
     """整颗大脑的默认参数。
@@ -167,10 +143,16 @@ class BrainConfig:
 
     # --- 机制：时钟、唤醒、帧 ---
     state_tick_interval: float = 2.0
+    #: 本地兔子心跳写入间隔（秒）。
+    peer_heartbeat_seconds: float = 5.0
+    #: 心跳超过这么久（秒）判为离线。
+    peer_heartbeat_timeout: float = 15.0
     #: 身体状态落盘间隔（秒）；brain 在 tick 里按此节流保存 body.json。
     body_save_interval: float = 60.0
     #: 定期唤醒间隔：机械生物的基础心跳，也是唯一的兜底唤醒，与事件 / 闹钟 / 信号无关。
-    periodic_wake_seconds: float = 1800.0
+    periodic_wake_seconds: float = 600.0
+    #: 单帧 inbox 上限：只取最近这么多条未处理事件；0 表示不限制。
+    inbox_max_events: int = constants.INBOX_MAX_EVENTS
     next_wake_max_seconds: int = 86400
     frame_timeout_seconds: float = 60.0
     wake_deadbands: dict[str, tuple[float, ...]] = field(
@@ -205,10 +187,6 @@ class BrainConfig:
     relation_thresholds: RelationThresholds = field(
         default_factory=RelationThresholds
     )
-    urge_rates: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_URGE_RATES)
-    )
-    circadian_curve: tuple[tuple[float, float], ...] = DEFAULT_CIRCADIAN_CURVE
     #: 静默时精力回满所需秒数（0→1）。
     energy_full_recovery_seconds: float = 6 * 3600.0
     #: 连续忙碌多久耗尽精力（1→0）。
@@ -256,8 +234,6 @@ class BrainConfig:
 
 __all__ = [
     "DEFAULT_BRAIN_DIR",
-    "DEFAULT_CIRCADIAN_CURVE",
-    "DEFAULT_URGE_RATES",
     "DEFAULT_WAKE_DEADBANDS",
     "BrainPaths",
     "RelationThresholds",

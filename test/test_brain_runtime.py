@@ -34,8 +34,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot.qq_adapter import QQAdapter
 from manager.brain import Brain
-from manager.shared.config import BrainPaths
-from manager.shared.types import ActivityStatus
+from manager.mesh.mesh import MeshService
+from manager.shared.config import BrainConfig, BrainPaths
+from manager.shared.timeutil import to_iso
+from manager.shared.types import (
+    ActivityStatus,
+    Event,
+    EventKind,
+    EventSource,
+)
 
 _FENCE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 
@@ -74,8 +81,6 @@ def _message_event(situation: dict) -> dict:
 def _target_from(event: dict) -> dict:
     return {
         "friend_id": event["friend_id"],
-        "conversation_id": event["conversation_id"],
-        "conversation_type": event.get("conversation_type", "c2c"),
     }
 
 
@@ -107,23 +112,10 @@ class FakeTransport:
     def __init__(self):
         self.sent = []
 
-    def send_c2c_message(self, conversation_id, msg_id, content, msg_type=0):
+    def send_message(self, friend_id, msg_id, content, msg_type=0):
         self.sent.append(
             {
-                "kind": "c2c",
-                "to": conversation_id,
-                "msg_id": msg_id,
-                "text": content,
-                "msg_type": msg_type,
-            }
-        )
-        return True
-
-    def send_group_message(self, conversation_id, msg_id, content, msg_type=0):
-        self.sent.append(
-            {
-                "kind": "group",
-                "to": conversation_id,
+                "to": friend_id,
                 "msg_id": msg_id,
                 "text": content,
                 "msg_type": msg_type,
@@ -171,8 +163,6 @@ def _startup_decision(messages):
             "action": "chat.reach_out",
             "target": {
                 "friend_id": "u_startup",
-                "conversation_id": "u_startup",
-                "conversation_type": "c2c",
             },
             "args": {"text": "（启动）"},
             "handled": [e["id"] for e in sit.get("inbox", [])],
@@ -223,8 +213,6 @@ def _reach_out(text, friend_id="u_123"):
             if event
             else {
                 "friend_id": friend_id,
-                "conversation_id": friend_id,
-                "conversation_type": "c2c",
             }
         )
         return json.dumps(
@@ -312,13 +300,13 @@ def test_passive_reply(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "你好")
+        QQAdapter(brain).submit_message("u_123", "m_1", "你好")
         assert wait_until(
             lambda: any(m["text"] == "你好呀，我在的。" for m in transport.sent)
         ), "被动回复未发出"
         sent = next(m for m in transport.sent if m["text"] == "你好呀，我在的。")
         assert sent["msg_id"] == "m_1", "被动回复应带来信 msg_id"
-        assert sent["kind"] == "c2c"
+        assert sent["to"] == "u_123", "回复应发到来信好友"
         assert "你好呀，我在的。" in brain.memory.recent_context(), "回复未写入 L1"
         assert not brain.events.unhandled(), "消息事件应已标记处理"
     finally:
@@ -334,7 +322,7 @@ def test_tool_call_then_reply(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "现在几点")
+        QQAdapter(brain).submit_message("u_123", "m_1", "现在几点")
         assert wait_until(
             lambda: any(m["text"] == "查好了。" for m in transport.sent)
         ), "tool.call 后未回复"
@@ -364,7 +352,7 @@ def test_eat_capability(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "饿了")
+        QQAdapter(brain).submit_message("u_123", "m_1", "饿了")
         assert wait_until(lambda: eaten == ["胡萝卜"]), "eat 能力未触发进食"
         assert wait_until(
             lambda: any(m["text"] == "吃饱了。" for m in transport.sent)
@@ -380,7 +368,7 @@ def test_reach_out(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "在吗")
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
         assert wait_until(
             lambda: any(m["text"] == "突然想起你了。" for m in transport.sent)
         ), "reach_out 未发出"
@@ -403,12 +391,12 @@ def test_activity_lifecycle(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "开始学习吧")
+        QQAdapter(brain).submit_message("u_123", "m_1", "开始学习吧")
         assert wait_until(lambda: brain.activities.active() is not None), "活动未开始"
         act = brain.activities.active()
         assert act.kind == "learn" and act.goal == "了解 Python 装饰器"
 
-        QQAdapter(brain).submit_c2c("u_123", "m_2", "学完了")
+        QQAdapter(brain).submit_message("u_123", "m_2", "学完了")
         assert wait_until(lambda: brain.activities.active() is None), "活动未结束"
         assert (
             brain.activities.get(act.id).status is ActivityStatus.COMPLETED
@@ -431,7 +419,7 @@ def test_alarm_wake(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "先忙")
+        QQAdapter(brain).submit_message("u_123", "m_1", "先忙")
         assert wait_until(
             lambda: any(m["text"] == "待会儿再聊" for m in transport.sent)
         ), "首次回复未发出"
@@ -453,13 +441,137 @@ def test_idle(tmpdir):
     brain.start()
     try:
         wait_startup(brain, llm, transport)
-        QQAdapter(brain).submit_c2c("u_123", "m_1", "在吗")
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
         assert wait_until(lambda: not brain.events.unhandled()), "idle 帧未处理事件"
         assert transport.sent == [], "idle 不应发出任何消息"
         clock.advance(2.0)
         assert wait_until(
             lambda: any(m["text"] == "刚才没想说啥。" for m in transport.sent)
         ), "idle 的 next_wake_in 未触发后续唤醒"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_mesh_roundtrip(tmpdir):
+    peers_root = os.path.join(tmpdir, "peers")
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _reply("收到啦！")])
+    transport = FakeTransport()
+    bob = MeshService(peers_root, slug="Bob", name="Bob", now_fn=clock.now)
+    alice = MeshService(peers_root, slug="Alice", name="Alice", now_fn=clock.now)
+    brain = Brain(
+        paths=BrainPaths(root=os.path.join(tmpdir, "alice")),
+        llm=llm,
+        transport=transport,
+        mesh=alice,
+        snapshot_getter=lambda: {"satiety": 80.0},
+        now_fn=clock.now,
+        enable_logging=False,
+    )
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        bob.heartbeat()
+        alice.heartbeat()
+        assert any(p.slug == "Alice" for p in bob.discover()), "Bob 未发现 Alice"
+        assert any(p.slug == "Bob" for p in alice.discover()), "Alice 未发现 Bob"
+
+        bob.send_message("peer:Alice", "m_bob_1", "在吗")
+        clock.advance(2.0)
+        brain.tick(2.0)
+
+        def alice_replied():
+            return any("收到啦！" in m.text for m in bob.poll_inbox())
+
+        assert wait_until(alice_replied), "Alice 未通过本地通道回复 Bob"
+        assert brain.memory.friend("peer:Bob").first_seen, "Bob 未进入 Alice 的朋友记忆"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_peer_online_wake(tmpdir):
+    peers_root = os.path.join(tmpdir, "peers")
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _idle()])
+    transport = FakeTransport()
+    bob = MeshService(peers_root, slug="Bob", name="Bob", now_fn=clock.now)
+    alice = MeshService(peers_root, slug="Alice", name="Alice", now_fn=clock.now)
+    brain = Brain(
+        paths=BrainPaths(root=os.path.join(tmpdir, "alice")),
+        llm=llm,
+        transport=transport,
+        mesh=alice,
+        snapshot_getter=lambda: {"satiety": 80.0},
+        now_fn=clock.now,
+        enable_logging=False,
+    )
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        bob.heartbeat()
+        alice.heartbeat()
+        clock.advance(2.0)
+        brain.tick(2.0)
+
+        def peer_online_signal():
+            return any(
+                e.kind == EventKind.SIGNAL
+                and e.payload.get("signal") == "peer_online"
+                and e.payload.get("slug") == "Bob"
+                for e in brain.events.all()
+            )
+
+        assert peer_online_signal(), "peer 上线未触发 peer_online 信号"
+        assert wait_until(lambda: len(llm.calls) >= 2), "peer 上线未唤醒认知帧"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_inbox_cap_drains(tmpdir):
+    clock = Clock()
+    llm = FakeLLM([_startup_decision] + [_reply("收到") for _ in range(4)])
+    transport = FakeTransport()
+    config = BrainConfig(
+        paths=BrainPaths(root=os.path.join(tmpdir, "alice")),
+        inbox_max_events=2,
+    )
+    brain = Brain(
+        config=config,
+        llm=llm,
+        transport=transport,
+        snapshot_getter=lambda: {"satiety": 80.0},
+        now_fn=clock.now,
+        enable_logging=False,
+    )
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        # 3 条静默入队，最后 1 条走 submit_event 触发一次唤醒，确保 4 条同时待处理。
+        for i in range(3):
+            brain.events.add(
+                Event(
+                    id="",
+                    kind=EventKind.MESSAGE,
+                    at=to_iso(clock.now()),
+                    source=EventSource(friend_id="u_123"),
+                    payload={"msg_id": f"m_{i}", "text": f"消息{i}"},
+                )
+            )
+        brain.submit_event(
+            Event(
+                id="",
+                kind=EventKind.MESSAGE,
+                at=to_iso(clock.now()),
+                source=EventSource(friend_id="u_123"),
+                payload={"msg_id": "m_3", "text": "消息3"},
+            )
+        )
+
+        assert wait_until(lambda: not brain.events.unhandled()), "积压未排空"
+
+        for messages in llm.calls:
+            inbox = _situation(messages).get("inbox", [])
+            assert len(inbox) <= 2, f"inbox 超过上限：{len(inbox)}"
     finally:
         brain.stop("测试结束")
 
@@ -471,7 +583,7 @@ def test_persistence_reload(tmpdir):
     brain = make_brain(tmpdir, llm, transport)
     brain.start()
     wait_startup(brain, llm, transport)
-    QQAdapter(brain).submit_c2c("u_123", "m_1", "开始学习")
+    QQAdapter(brain).submit_message("u_123", "m_1", "开始学习")
     assert wait_until(lambda: brain.activities.active() is not None)
     brain.stop("崩溃模拟")
 
@@ -497,6 +609,9 @@ _TESTS = [
     ("活动生命周期", test_activity_lifecycle),
     ("闹钟唤醒", test_alarm_wake),
     ("待机 idle 终态", test_idle),
+    ("本地兔子网格往返", test_mesh_roundtrip),
+    ("peer 上线唤醒", test_peer_online_wake),
+    ("inbox 上限并逐帧排空", test_inbox_cap_drains),
     ("持久化与重载", test_persistence_reload),
 ]
 

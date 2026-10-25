@@ -42,7 +42,6 @@ class BodyState:
     satiety: float          # 0~100，饱食度（桌宠本体权威）
     energy: float           # 0~1，精力
     social_battery: float   # 0~1，社交电量
-    circadian: float        # 0~1，昼夜活动基线
     presence: bool          # 电脑前是否有人
 ```
 
@@ -55,7 +54,6 @@ class BodyState:
 | `satiety` | 吃东西（`eat` 能力） | 时间流逝 | 饥饿感 |
 | `energy` | 静默、空闲 | 活动、忙碌 | 愿不愿意做长活动、回复长短 |
 | `social_battery` | 独处、安静 | 社交互动 | 想不想说话、社交耐受 |
-| `circadian` | 白天 | 深夜 | 活动量、睡眠倾向 |
 | `presence` | 有人回到电脑前 | 人离开 | 是否适合主动开口 |
 
 ### 2.3 稳态模型
@@ -63,7 +61,6 @@ class BodyState:
 - **饱食度以 `components/bunny.py` 为权威**：`body.py` 只读 `BunnySnapshot`，未注入快照时保持 `stale`、沿用上次值。
 - **精力**：`idle_seconds`（dt - busy_seconds）回复，`busy_seconds` 消耗；`energy_full_recovery_seconds` 与 `energy_drain_seconds` 各 6 小时。
 - **社交电量**：每次互动扣 `social_cost_per_interaction`（0.03），独处时按 `social_full_recovery_seconds` 回复。
-- **昼夜节律**：按 `circadian_curve` 平滑曲线，深夜约 0.2，白天约 0.9。
 
 ### 2.4 身体的边界
 
@@ -122,7 +119,7 @@ confidence      = Σ w_i
 ```python
 @dataclass
 class Urge:
-    name: str          # 饥饿 / 孤独 / 想念 / 分享 / 睡意 / 日常
+    name: str          # 饥饿 / 孤独 / 想念 / 分享 / 日常
     level: float       # 0~1
     reason: str        # 一句话说明来源
     target: str | None # None 表示不指向特定朋友
@@ -134,14 +131,7 @@ class Urge:
 | 孤独 | 有人在场但长时间无互动，或长时间无人 | 社交需求缺口 |
 | 想念 | 某位高态度朋友长期未出现 | 需要 L2 情景时间戳 |
 | 分享 | 最近有新发现/新记忆 | 由活动结果抬升 |
-| 睡意 | 深夜 + 低刺激 + 低精力 | 与昼夜节律相关 |
-| 日常 | 昼夜相位 | 早安/晚安等时间锚点 |
-
-累积速率在 `config.urge_rates`；累积可写成：
-
-```
-level += rate * deficit * circadian_gain * dt
-```
+| 日常 | 时钟时刻 | 早安/晚安等时间锚点 |
 
 但**是否回报、是否说话、做什么**，全部由 LLM 决定。
 
@@ -163,7 +153,6 @@ level += rate * deficit * circadian_gain * dt
 | `satiety` | 跨过 80 / 60 / 40 / 20 分段边界（向下） |
 | `energy` | 跨过 0.5 / 0.25，或 10 分钟变化超过 0.15 |
 | `social_battery` | 跨过 0.3 |
-| `circadian` | 昼夜相位切换（跨 0.5） |
 
 ---
 
@@ -175,24 +164,21 @@ level += rate * deficit * circadian_gain * dt
     "identity": "Alice",
     "mood": 0.4,
     "mood_label": "轻快",
-    "urges": {
-      "饥饿": {"level": 0.7, "reason": "饱食度 62"},
-      "孤独": {"level": 0.2, "reason": "今天还没人说话"},
-      "睡意": {"level": 0.1, "reason": "下午"}
-    }
+    "urge_details": [
+      {"name": "饥饿", "level": 0.7, "reason": "饱食度 62"},
+      {"name": "孤独", "level": 0.2, "reason": "今天还没人说话"}
+    ]
   },
   "body": {
-    "satiety": 62,
-    "energy": 0.71,
-    "social_battery": 0.6,
-    "circadian": 0.8,
+    "satiety": "62/100",
+    "energy": "0.71/1",
+    "social_battery": "0.6/1",
     "presence": true
   },
   "environment": {
     "someone_present": true,
     "idle_seconds": 42,
-    "foreground_title": "Visual Studio Code",
-    "at_night": false
+    "foreground_title": "Visual Studio Code"
   }
 }
 ```
@@ -219,8 +205,6 @@ level += rate * deficit * circadian_gain * dt
 | `attitude_half_life` | 态度半衰期 |
 | `acquaintance_min_age` | 关系封顶"认识"的最短相识时长 |
 | `relation_thresholds` | 关系等级切分 |
-| `urge_rates` | 各欲望的累积速率 |
-| `circadian_curve` | 昼夜曲线 |
 | `energy_full_recovery_seconds` / `energy_drain_seconds` | 精力回满/耗尽时长 |
 | `social_cost_per_interaction` / `social_full_recovery_seconds` | 社交电量消耗/回复 |
 | `wake_deadbands` | 显著变化的分段边界（由 lifecycle 使用） |

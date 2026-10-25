@@ -42,7 +42,6 @@ class SignalDetector:
             self._numeric(changes, SignalName.SATIETY, prev_body.satiety, body.satiety)
             self._energy(changes, prev_body.energy, body.energy)
             self._social(changes, prev_body.social_battery, body.social_battery)
-            self._circadian(changes, prev_body.circadian, body.circadian)
         if prev_environment is not None:
             self._presence(changes, prev_environment, environment)
             self._foreground(changes, prev_environment, environment)
@@ -106,19 +105,6 @@ class SignalDetector:
 
     def _social(self, changes: list[SignalChange], previous: float, current: float) -> None:
         self._numeric(changes, SignalName.SOCIAL_BATTERY, previous, current)
-
-    def _circadian(
-        self, changes: list[SignalChange], previous: float, current: float
-    ) -> None:
-        if (previous < 0.5 <= current) or (previous >= 0.5 > current):
-            changes.append(
-                SignalChange(
-                    signal=SignalName.CIRCADIAN,
-                    from_value=round(previous, 2),
-                    to_value=round(current, 2),
-                    detail="昼夜相位切换",
-                )
-            )
 
     def _presence(
         self,

@@ -50,7 +50,7 @@
 ```json
 {
   "action": "chat.reply",
-  "target": {"friend_id": "u_123", "conversation_id": "c_123"},
+  "target": {"friend_id": "u_123"},
   "args": {"text": "在呀，怎么啦"},
   "calls": [],
   "activity_update": null,
@@ -213,7 +213,7 @@ Decision:
 Decision:
 {
   "action": "chat.reach_out",
-  "target": {"friend_id": "u_123", "conversation_id": "c_123"},
+  "target": {"friend_id": "u_123"},
   "args": {"text": "看到一篇讲小模型的文章，想起你上次问过～"},
   "next_wake_in": 600
 }

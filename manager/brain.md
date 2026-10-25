@@ -12,7 +12,7 @@ manager/
 ├── brain.md                 ← 总纲：原则、全局工作流、模块地图、契约、生命周期
 ├── new_brain.md             ← 模块划分与接口速览（与本文一致）
 └── design/                 # 每个子模块一份文档，按数据流排序
-    ├── 01-environment.md    环境：在场、空闲、前台窗口、昼夜
+    ├── 01-environment.md    环境：在场、空闲、前台窗口
     ├── 02-body.md           身体与自我状态：稳态、情绪、态度、欲望
     ├── 03-memory.md         记忆：情感痕迹、关系、召回、巩固
     ├── 04-capabilities.md   能力：注册、异步、审计
@@ -32,7 +32,7 @@ manager/
 
 Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 
-- 她有身体：饱食度、精力、社交电量、昼夜节律。疲惫只由这些连续量体现，不设醒/睡二元状态。
+- 她有身体：饱食度、精力、社交电量。疲惫只由这些连续量体现，不设醒/睡二元状态。
 - 她有记忆：具体经历、对每位朋友的态度、逐渐长成的自我认知。
 - 她有生活：聊天、上网、探索本地、学习、整理记忆、发呆。
 - 她只有**一个意识**：同一时刻只想一件事，所有行为都出自同一个决策中心。
@@ -364,7 +364,7 @@ main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator
 | `environment/environment.py` | 每个状态时钟聚合一次环境快照 | `bunny_snapshot`、OS API | `EnvironmentState` |
 | `environment/presence.py` | 电脑前是否有人 | `GetLastInputInfo` | `idle_seconds`、`someone_present` |
 | `environment/foreground.py` | 前台窗口粗分类与持续时长 | `pywinctl` 窗口信息 | `foreground_title`、dwell |
-| `body/body.py` | 维护 `BodyState`；读取饱食度快照，更新精力/社交/昼夜 | 环境、饱食度快照、互动、`dt`、忙碌时长 | `BodyState` |
+| `body/body.py` | 维护 `BodyState`；读取饱食度快照，更新精力/社交 | 环境、饱食度快照、互动、`dt`、忙碌时长 | `BodyState` |
 | `body/self_state.py` | 从身体与记忆派生心情/态度/欲望；只读 | `BodyState`、记忆视图、当前时间 | `SelfState` |
 
 **memory / capabilities**
@@ -430,9 +430,9 @@ class Brain:
 ```text
 QQ 网关
   └─ QQClient 收到 C2C_MESSAGE_CREATE
-       └─ QQAdapter.normalize(raw)
-            → Event(kind="message", source={friend_id, conversation_id},
-                    payload={text, msg_id, conversation_type})
+       └─ QQAdapter.message(raw)
+            → Event(kind="message", source={friend_id},
+                    payload={text, msg_id})
             → Brain.submit_event(event)
                  ├─ EventQueue.add(event)             # 未处理
                  └─ _notify(EVENT)                    # 立即唤醒认知 worker
@@ -440,7 +440,7 @@ QQ 网关
 
 - Adapter 不判断重要性、不过滤、不合并内容；只做协议归一化。
 - `msg_id` 保留在 payload，供被动回复使用。
-- 单聊中 `friend_id == conversation_id == user_openid`。
+- `friend_id` 即 `user_openid`，一条消息只对应一个会话。
 
 **B. 状态时钟**
 
@@ -561,7 +561,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
   "kind": "message | capability_done | capability_failed |
            activity_checkpoint | alarm | signal | system",
   "at": "2026-10-20T21:03:11+08:00",
-  "source": {"friend_id": "u_123", "conversation_id": "c_123"},
+  "source": {"friend_id": "u_123"},
   "payload": {"text": "在吗"},
   "arrived_during": {"type": "activity", "id": "act_17"},
   "status": "unhandled | handled"
@@ -573,7 +573,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
 
 | `kind` | `payload` 最小字段 | 产生者 |
 | --- | --- | --- |
-| `message` | `{text, msg_id?, conversation_type?}` | `qq_adapter` |
+| `message` | `{text, msg_id?}` | `qq_adapter` |
 | `capability_done` | `{call_id, capability, ok: true, result_summary, result_ref?}` | `capabilities/executor` |
 | `capability_failed` | `{call_id, capability, ok: false, error, reason, detail}` | `capabilities/executor` |
 | `activity_checkpoint` | `{activity_id, kind, progress, steps_used, reason}` | `activity` / `brain` |
@@ -586,7 +586,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
 ```json
 {
   "action": "chat.reply",
-  "target": {"friend_id": "u_123", "conversation_id": "c_123", "conversation_type": "c2c"},
+  "target": {"friend_id": "u_123"},
   "args": {},
   "calls": [],
   "activity_update": null,

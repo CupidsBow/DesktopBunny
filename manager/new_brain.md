@@ -10,7 +10,7 @@ Alice 的目的是构建一个持续存在的智能生物，有身体状态、�
 ## 2. 模块划分
 
 - brain.py  Alice 的中枢，负责装配所有子模块、管理线程与生命周期
-- body/  身体模块，记录 Alice 当前的各项身体数值（精力/饱食/社交/昼夜等连续量），疲惫只由这些数值体现，不设醒/睡二元状态；并派生情绪、态度、欲望
+- body/  身体模块，记录 Alice 当前的各项身体数值（精力/饱食/社交等连续量），疲惫只由这些数值体现，不设醒/睡二元状态；并派生情绪、态度、欲望
 - environment/  环境模块，获取 Alice 周围的环境信息（电脑上的环境信息）
 - memory/  记忆模块，存储 Alice 的长短期记忆，并承担定期蒸馏记忆的功能
 - capabilities/  能力模块，管理 Alice 当前所有可以执行的操作
@@ -41,8 +41,7 @@ Alice 的目的是构建一个持续存在的智能生物，有身体状态、�
 | | `write_semantic(target, content)` | 写语义记忆 |
 | | `record_turn(speaker, user, reply, at)` | 记一轮对话进 L1 |
 | | `recent_episodes(window, limit)` | 取近期情景记忆 |
-| capabilities/ | `names()` | 能力名列表（给情境）|
-| | `as_dicts()` | 能力 schema 清单（给 prompt）|
+| capabilities/ | `as_dicts()` | 能力 schema 清单（给 prompt）|
 | | `submit(call)` | 执行一次能力调用 |
 | | `submit_many(calls)` | 并发执行多个能力调用 |
 | activity/ | `start(kind, goal)` | 开始一段活动 |

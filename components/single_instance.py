@@ -1,9 +1,11 @@
-"""单实例守护：同一时间只允许一个 Bunny 进程运行。
+"""单实例守护：同一时间同一名字只允许一个 Bunny 进程运行。
 
 Bunny 的 LLM 能通过 sandbox 工具运行任意命令，存在把自己再启动一份的风险。
 这里用一把进程级闸门挡住：第一个进程创建并持有它，直到进程退出才释放；
 之后任何进程（手动双击，或 sandbox 里 ``python main.py`` / 启动 exe）拿到同一把闸，
-发现已被持有就立即退出，不会出现第二个 Bunny。
+发现已被持有就立即退出，不会出现同名的第二个 Bunny。
+
+闸门按兔子名字隔离：不同名字（BUNNY_NAME）的 exe 各拿各的闸，可以同时共存。
 
 对象必须存活到进程结束——它持有的句柄是闸门的唯一凭证，被回收就等于放行。
 """
@@ -14,12 +16,10 @@ import logging
 import os
 import tempfile
 
+from constants import constants
+
 logger = logging.getLogger(__name__)
 
-#: 具名互斥量（Windows）。名字固定，所有 Bunny 实例共用同一把闸。
-_MUTEX_NAME = "DesktopBunny_Alice_SingleInstance"
-#: 非 Windows 平台的兜底锁文件名。
-_LOCK_FILENAME = "desktop_bunny_single_instance.lock"
 #: GetLastError 返回值：对象已存在，说明已有进程持有该互斥量。
 _ERROR_ALREADY_EXISTS = 183
 
@@ -36,8 +36,10 @@ class SingleInstance:
         # guard 必须存活到进程结束
     """
 
-    def __init__(self, name: str = _MUTEX_NAME) -> None:
-        self.name = name
+    def __init__(self, bunny_name: str | None = None) -> None:
+        slug = (bunny_name or constants.BUNNY_NAME_SLUG).strip() or "bunny"
+        self.name = f"DesktopBunny_{slug}_SingleInstance"
+        self._lock_filename = f"desktop_bunny_{slug}_single_instance.lock"
         self._handle = None
         self._lock_file = None
 
@@ -77,7 +79,7 @@ class SingleInstance:
     def _acquire_lockfile(self) -> bool:
         import fcntl
 
-        path = os.path.join(tempfile.gettempdir(), _LOCK_FILENAME)
+        path = os.path.join(tempfile.gettempdir(), self._lock_filename)
         handle = open(path, "a+", encoding="utf-8")
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)

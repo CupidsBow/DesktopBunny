@@ -77,7 +77,6 @@ class Executor:
         decision: Decision,
         *,
         speaker: str | None = None,
-        conversation: str | None = None,
         caller: str = "",
         at: datetime | None = None,
     ) -> EffectResult:
@@ -85,12 +84,9 @@ class Executor:
         result = EffectResult()
         target = decision.target
         speaker = (target.friend_id if target else None) or speaker
-        conversation = (
-            (target.conversation_id if target else None) or conversation
-        )
 
         # 1. 记忆写入不阻塞后续发送
-        self._remember(decision, speaker, conversation, at, result)
+        self._remember(decision, speaker, at, result)
 
         # 2. 聊天
         if decision.action in (Action.CHAT_REPLY, Action.CHAT_REACH_OUT):
@@ -116,7 +112,6 @@ class Executor:
         self,
         decision: Decision,
         speaker: str | None,
-        conversation: str | None,
         at: datetime,
         result: EffectResult,
     ) -> None:
@@ -126,7 +121,6 @@ class Executor:
             self.memory.remember(
                 decision.remember,
                 speaker=speaker,
-                conversation=conversation,
                 at=at,
             )
         except Exception as exc:

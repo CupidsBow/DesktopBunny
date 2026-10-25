@@ -10,7 +10,6 @@ from manager.capabilities.registry import CapabilityRegistry
 from manager.frame_generator.prompt import build_messages
 from manager.frame_generator.situation import SituationBuilder
 from manager.memory.memory import Memory
-from manager.shared.config import BrainConfig
 from manager.shared.timeutil import now_local
 from manager.shared.types import (
     Activity,
@@ -35,14 +34,15 @@ class Frame:
 class FrameGenerator:
     def __init__(
         self,
-        config: BrainConfig,
         memory: Memory,
         registry: CapabilityRegistry,
         *,
         now_fn=now_local,
+        name: str = "Alice",
     ) -> None:
-        self._situation = SituationBuilder(config, memory, now_fn=now_fn)
+        self._situation = SituationBuilder(memory, now_fn=now_fn, name=name)
         self._registry = registry
+        self._name = name
 
     def build(
         self,
@@ -52,7 +52,6 @@ class FrameGenerator:
         self_state: SelfState,
         events: Iterable[Event],
         wake_reasons: Iterable[WakeReason],
-        capabilities: Iterable[str] | None = None,
         active_activity: Activity | None = None,
         paused_activity: Activity | None = None,
         turn_state: TurnState | None = None,
@@ -60,17 +59,11 @@ class FrameGenerator:
         now: datetime | None = None,
         notes: Iterable[str] | None = None,
     ) -> Frame:
-        names = (
-            list(capabilities)
-            if capabilities is not None
-            else self._registry.names()
-        )
         situation = self._situation.build(
             environment=environment,
             body=body,
             self_state=self_state,
             events=events,
-            capabilities=names,
             wake_reasons=wake_reasons,
             active_activity=active_activity,
             paused_activity=paused_activity,
@@ -79,7 +72,9 @@ class FrameGenerator:
             now=now,
             notes=notes,
         )
-        messages = build_messages(situation, self._registry.as_dicts())
+        messages = build_messages(
+            situation, self._registry.as_dicts(), name=self._name
+        )
         return Frame(situation=situation, messages=messages)
 
 

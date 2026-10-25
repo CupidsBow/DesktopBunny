@@ -4,7 +4,7 @@ import os
 from constants import constants
 
 class SaveManager:
-    """本地存档管理器，存档固定保存在 C 盘用户应用数据目录"""
+    """本地存档管理器，存档固定保存在 %LOCALAPPDATA%\\Bunny\\<名字>\\ 下"""
 
     def __init__(self, filename: str = "bunny_save.dat", xor_key: int = 0x5A):
         """
@@ -12,9 +12,9 @@ class SaveManager:
             filename: 存档文件名
             xor_key:  XOR 混淆密钥 (0-255)
         """
-        # 确保文件夹存在
-        os.makedirs(constants.DEFAULT_SAVE_DIR, exist_ok=True)
-        self.save_path = os.path.join(constants.DEFAULT_SAVE_DIR, filename)
+        # 确保名字文件夹存在
+        os.makedirs(constants.BUNNY_DATA_DIR, exist_ok=True)
+        self.save_path = os.path.join(constants.BUNNY_DATA_DIR, filename)
         self._xor_key = xor_key
 
     def save(self, data: dict) -> None:

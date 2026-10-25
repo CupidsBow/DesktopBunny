@@ -15,6 +15,7 @@ from tools.platform_detector import PlatformDetector
 from bot import bridge
 from bot.qq_client import QQClient
 from manager.brain import Brain
+from manager.mesh.mesh import MeshService
 from manager.save_manager import SaveManager
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -40,6 +41,7 @@ class World:
         self.bunny = None
         self.brain = None
         self.qq_client = None
+        self.mesh = None
         # 认知线程请求进食 → 主线程消费，饱食度仍由 bunny 权威维护
         self._eat_requests: queue.Queue[str] = queue.Queue()
         self.tray_icon = None
@@ -94,10 +96,18 @@ class World:
         bridge.set_bunny_snapshot({"satiety": self.bunny.satiety})
 
         self.qq_client = QQClient()
+        self.mesh = MeshService(
+            constants.PEERS_DIR,
+            slug=constants.BUNNY_NAME_SLUG,
+            name=constants.BUNNY_NAME,
+        )
         self.brain = Brain(
             transport=self.qq_client,
             snapshot_getter=bridge.get_bunny_snapshot,
             eat_handler=self._request_eat,
+            name=constants.BUNNY_NAME,
+            bunny_friends=[f"peer:{slug}" for slug in constants.BUNNY_FRIENDS],
+            mesh=self.mesh,
         )
         self.brain.start()
         self.qq_client.set_brain(self.brain)
@@ -130,7 +140,7 @@ class World:
     
     def _on_tray_interact_bunny(self, icon, item):
         if self.bunny:
-            self.bunny.set_comment(f"主人，{constants.ALICE_NAME}在这哦~")
+            self.bunny.set_comment(f"主人，{constants.BUNNY_NAME}在这哦~")
 
     def _refresh_tray_menu(self):
         if not self.tray_icon:
@@ -141,7 +151,7 @@ class World:
     def _build_menu(self):
         bunny_items = [
             pystray.MenuItem(
-                lambda item: f"🐰{constants.ALICE_NAME}: 饱食度 {int(self.bunny.satiety)}",
+                lambda item: f"🐰{constants.BUNNY_NAME}: 饱食度 {int(self.bunny.satiety)}",
                 self._on_tray_interact_bunny,
             )
         ]
@@ -426,8 +436,9 @@ if __name__ == "__main__":
         "%(asctime)s %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
+    os.makedirs(constants.BUNNY_DATA_DIR, exist_ok=True)
     file_handler = TimedRotatingFileHandler(
-        filename=os.path.join(constants.DEFAULT_SAVE_DIR, "app.log"),
+        filename=os.path.join(constants.BUNNY_DATA_DIR, "app.log"),
         when="midnight",   # 每天凌晨 0 点切分
         interval=1,        # 每 1 天
         backupCount=30,    # 最多保留 30 天日志

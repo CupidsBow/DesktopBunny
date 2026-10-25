@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Iterable, Mapping
 
 from manager.shared.config import BrainConfig, RelationThresholds
-from manager.shared.timeutil import decay_factor, is_night, parse_iso
+from manager.shared.timeutil import decay_factor, parse_iso
 from manager.shared.types import (
     Attitude,
     BodyState,
@@ -41,7 +41,7 @@ class SelfStateDeriver:
         episodes = list(episodes or [])
         mood = self._mood(episodes, now)
         attitudes = self._attitudes(episodes, now)
-        urges = self._urges(body, attitudes, episodes, now, is_night(now))
+        urges = self._urges(body, attitudes, episodes, now)
         return SelfState(
             mood=round(mood, 3),
             mood_label=self._mood_label(mood),
@@ -175,7 +175,6 @@ class SelfStateDeriver:
         attitudes: Mapping[str, Attitude],
         episodes: list[Episode],
         now: datetime,
-        at_night: bool,
     ) -> list[Urge]:
         urges: list[Urge] = []
 
@@ -194,22 +193,6 @@ class SelfStateDeriver:
                 name="孤独",
                 level=round(lonely, 3),
                 reason=f"社交电量 {body.social_battery:.2f}",
-            )
-        )
-
-        sleepiness = (
-            (1.0 - body.energy) * 0.6
-            + (1.0 - body.circadian) * 0.4
-            + (0.2 if at_night else 0.0)
-        )
-        urges.append(
-            Urge(
-                name="睡意",
-                level=round(max(0.0, min(1.0, sleepiness)), 3),
-                reason=(
-                    f"精力 {body.energy:.2f}、昼夜 {body.circadian:.2f}"
-                    + ("、夜深" if at_night else "")
-                ),
             )
         )
 
@@ -255,9 +238,9 @@ class SelfStateDeriver:
             if seen is None:
                 continue
             age = max(0.0, (now - seen).total_seconds())
-            if age < 24 * 3600:
+            if age < 8 * 3600:
                 continue
-            level = max(0.0, min(1.0, age / (7 * 86400.0)))
+            level = max(0.0, min(1.0, age / (2 * 86400.0)))
             if best is None or level > best.level:
                 best = Urge(
                     name="想念",

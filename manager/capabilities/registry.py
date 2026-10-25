@@ -86,12 +86,6 @@ class CapabilityRegistry:
     def as_dicts(self) -> list[dict[str, Any]]:
         return [capability.to_dict() for capability in self.all()]
 
-    def describe(self) -> str:
-        return "\n".join(
-            f"- {capability.name}: {capability.description}"
-            for capability in self.all()
-        )
-
     # ------------------------------------------------------------------
     def _register_builtins(self) -> None:
         self.add(

@@ -13,7 +13,7 @@ import os
 from typing import Callable
 
 from manager.shared.config import BrainConfig
-from manager.shared.timeutil import circadian_value, clamp, now_local
+from manager.shared.timeutil import clamp, now_local
 from manager.shared.types import BodyState, BunnySnapshot, EnvironmentState
 
 logger = logging.getLogger(__name__)
@@ -50,9 +50,6 @@ class Body:
         busy_seconds = min(dt, max(0.0, float(busy_seconds)))
         state = self.state
         now = environment.now if environment is not None else self._now_fn()
-        state.circadian = circadian_value(
-            now.hour + now.minute / 60.0, self.config.circadian_curve
-        )
         if environment is not None:
             state.presence = bool(environment.someone_present)
 
@@ -125,7 +122,6 @@ class Body:
             satiety=80.0,
             energy=0.72,
             social_battery=0.7,
-            circadian=0.5,
             presence=False,
         )
 

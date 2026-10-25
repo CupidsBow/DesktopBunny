@@ -1,7 +1,6 @@
 import json
 import logging
 import queue
-import re
 import threading
 import time
 
@@ -27,7 +26,6 @@ OP_HELLO = 10
 OP_HEARTBEAT_ACK = 11
 
 _TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
-_MENTION_RE = re.compile(r"<@!?\d+>")
 
 
 def _api_host() -> str:
@@ -197,8 +195,6 @@ class QQClient:
             self.logger.info("QQ 机器人已就绪")
         elif t == "C2C_MESSAGE_CREATE":
             self._on_c2c(d)
-        elif t == "GROUP_AT_MESSAGE_CREATE":
-            self._on_group(d)
 
     def _on_c2c(self, d):
         user_openid = (d.get("author") or {}).get("user_openid")
@@ -206,35 +202,21 @@ class QQClient:
         msg_id = d.get("id")
         if not user_openid or not content:
             return
-        self._pool.submit(self._handle_message, "c2c", user_openid, msg_id, content)
+        self._pool.submit(self._handle_message, user_openid, msg_id, content)
 
-    def _on_group(self, d):
-        group_openid = d.get("group_openid")
-        content = _MENTION_RE.sub("", d.get("content") or "").strip()
-        msg_id = d.get("id")
-        if not group_openid or not content:
-            return
-        self._pool.submit(self._handle_message, "group", group_openid, msg_id, content)
-
-    def _handle_message(self, kind, target_id, msg_id, content):
+    def _handle_message(self, user_openid, msg_id, content):
         """在 worker 线程里执行：所有消息都交给 Brain。"""
         if self._brain is None:
             self.logger.warning("Brain 尚未就绪，消息被忽略")
             return
-        if kind == "c2c":
-            self.adapter.submit_c2c(target_id, msg_id, content)
-        else:
-            self.adapter.submit_group(target_id, msg_id, content)
+        self.adapter.submit_message(user_openid, msg_id, content)
 
     # ---- 发消息（REST） ----
-    def send_c2c_message(self, user_openid, msg_id, content, msg_type=0):
+    def send_message(self, user_openid, msg_id, content, msg_type=None):
+        if msg_type is None:
+            msg_type = 2 if _needs_markdown(content) else 0
         return self._send_with_fallback(
             f"/v2/users/{user_openid}/messages", content, msg_type, msg_id
-        )
-
-    def send_group_message(self, group_openid, msg_id, content, msg_type=0):
-        return self._send_with_fallback(
-            f"/v2/groups/{group_openid}/messages", content, msg_type, msg_id
         )
 
     def _send_with_fallback(self, path, content, msg_type, msg_id) -> bool:
@@ -296,3 +278,7 @@ class QQClient:
         )
         r.raise_for_status()
         return r.json()["url"]
+
+
+def _needs_markdown(text: str) -> bool:
+    return "```" in (text or "") or "\n|" in (text or "")

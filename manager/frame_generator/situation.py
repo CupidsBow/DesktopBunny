@@ -8,7 +8,6 @@ from typing import Any, Iterable
 
 from manager.memory.index import render_line
 from manager.memory.memory import Memory
-from manager.shared.config import BrainConfig
 from manager.shared.timeutil import now_local, to_iso
 from manager.shared.types import (
     Activity,
@@ -28,14 +27,14 @@ logger = logging.getLogger(__name__)
 class SituationBuilder:
     def __init__(
         self,
-        config: BrainConfig,
         memory: Memory,
         *,
         now_fn=now_local,
+        name: str = "Alice",
     ) -> None:
-        self.config = config
         self.memory = memory
         self.now_fn = now_fn
+        self.name = name
 
     def build(
         self,
@@ -44,7 +43,6 @@ class SituationBuilder:
         body: BodyState,
         self_state: SelfState,
         events: Iterable[Event],
-        capabilities: Iterable[str],
         wake_reasons: Iterable[WakeReason],
         active_activity: Activity | None = None,
         paused_activity: Activity | None = None,
@@ -70,13 +68,9 @@ class SituationBuilder:
                 for reason in wake_reasons
             ],
             "self": {
-                "identity": "Alice",
+                "identity": self.name,
                 "mood": round(self_state.mood, 3),
                 "mood_label": self_state.mood_label,
-                "urges": {
-                    urge.name: round(urge.level, 3)
-                    for urge in self_state.urges
-                },
                 "urge_details": [
                     {
                         "name": urge.name,
@@ -96,10 +90,9 @@ class SituationBuilder:
                 },
             },
             "body": {
-                "satiety": round(body.satiety, 1),
-                "energy": round(body.energy, 3),
-                "social_battery": round(body.social_battery, 3),
-                "circadian": round(body.circadian, 3),
+                "satiety": f"{round(body.satiety)}/100",
+                "energy": f"{round(body.energy, 2)}/1",
+                "social_battery": f"{round(body.social_battery, 2)}/1",
                 "presence": body.presence,
             },
             "environment": {
@@ -110,8 +103,11 @@ class SituationBuilder:
                     else None
                 ),
                 "foreground_title": environment.foreground_title,
-                "at_night": environment.at_night,
                 "system": environment.system_state,
+                "peers": [
+                    {"name": peer.name, "slug": peer.slug}
+                    for peer in environment.peers
+                ],
             },
             "activity": _activity(primary),
             "turn": _turn(turn_state),
@@ -126,13 +122,7 @@ class SituationBuilder:
                 "index": [render_line(entry) for entry in view.index],
                 "recent_context": self.memory.recent_context(),
             },
-            "capabilities": list(capabilities),
             "delivery": _delivery(delivery),
-            "constraints": {
-                "periodic_wake_seconds": self.config.periodic_wake_seconds,
-                "next_wake_max_seconds": self.config.next_wake_max_seconds,
-                "frame_timeout_seconds": self.config.frame_timeout_seconds,
-            },
         }
         if notes:
             situation["notes"] = [str(note) for note in notes]
@@ -212,12 +202,8 @@ def _event(event: Event) -> dict[str, Any]:
         base.update(
             {
                 "friend_id": event.source.friend_id,
-                "conversation_id": event.source.conversation_id,
                 "text": event.payload.get("text", ""),
                 "msg_id": event.payload.get("msg_id"),
-                "conversation_type": event.payload.get(
-                    "conversation_type", "c2c"
-                ),
             }
         )
     else:

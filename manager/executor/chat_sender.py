@@ -1,4 +1,9 @@
-"""聊天发送：被动/主动降级、有限重试与投递状态。"""
+"""聊天发送：按 friend_id 路由通道，被动/主动降级、有限重试与投递状态。
+
+通道差异只在这一层的路由：``peer:`` 前缀走本地兔子网格，其余走 QQ。
+transport 接口统一为 ``send_message(friend_id, msg_id, text)``；QQ 专属的
+``msg_type``（markdown 判断）下沉进 QQ transport，这里不再关心。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,7 @@ import time
 from typing import Any
 
 from manager.shared.config import BrainConfig
-from manager.shared.types import ConversationType, DeliveryStatus, Target
+from manager.shared.types import DeliveryStatus, Target
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +23,12 @@ class ChatSender:
         config: BrainConfig,
         transport: Any = None,
         *,
+        mesh: Any = None,
         sleep_fn=time.sleep,
     ) -> None:
         self.config = config
         self.transport = transport
+        self.mesh = mesh
         self.sleep_fn = sleep_fn
 
     def send(
@@ -34,15 +41,12 @@ class ChatSender:
         text = (text or "").strip()
         if not text:
             return DeliveryStatus(ok=False, parts_sent=0, detail="消息内容为空")
-        if self.transport is None:
-            return DeliveryStatus(ok=False, parts_sent=0, detail="没有可用的发送通道")
 
-        msg_type = 2 if _needs_markdown(text) else 0
         msg_id = None if active else target.msg_id
-        ok = self._deliver(target, text, msg_id=msg_id, msg_type=msg_type)
+        ok = self._deliver(target, text, msg_id=msg_id)
         if not ok and msg_id:
             logger.warning("被动回复失败，降级为主动消息")
-            ok = self._deliver(target, text, msg_id=None, msg_type=msg_type)
+            ok = self._deliver(target, text, msg_id=None)
         if not ok:
             return DeliveryStatus(ok=False, parts_sent=0, detail="发送失败")
         return DeliveryStatus(ok=True, parts_sent=1)
@@ -57,12 +61,11 @@ class ChatSender:
         text: str,
         *,
         msg_id: str | None,
-        msg_type: int,
     ) -> bool:
         attempts = max(1, int(self.config.send_retry_limit) + 1)
         for attempt in range(attempts):
             try:
-                return self._call_transport(target, text, msg_id, msg_type)
+                return self._call_transport(target, text, msg_id)
             except Exception as exc:
                 logger.warning(
                     "发送消息异常（第 %s/%s 次）：%s", attempt + 1, attempts, exc
@@ -76,27 +79,24 @@ class ChatSender:
         target: Target,
         text: str,
         msg_id: str | None,
-        msg_type: int,
     ) -> bool:
-        conversation_id = target.conversation_id or target.friend_id
-        if not conversation_id:
-            raise ValueError("target 缺少 conversation_id")
-        conversation_type = getattr(
-            target.conversation_type, "value", target.conversation_type
-        )
-        if conversation_type == "group":
-            method = getattr(self.transport, "send_group_message", None)
-        else:
-            method = getattr(self.transport, "send_c2c_message", None)
+        friend_id = target.friend_id
+        if not friend_id:
+            raise ValueError("target 缺少 friend_id")
+        transport = self._transport_for(friend_id)
+        if transport is None:
+            raise ValueError(f"没有可用的发送通道：{friend_id}")
+        method = getattr(transport, "send_message", None)
         if method is None:
-            raise ValueError("发送通道不支持该会话类型")
-        result = method(conversation_id, msg_id, text, msg_type)
+            raise ValueError("发送通道不支持发送消息")
+        result = method(friend_id, msg_id, text)
         # 旧实现返回 None 表示成功；新实现返回 bool
         return result is not False
 
-
-def _needs_markdown(text: str) -> bool:
-    return "```" in text or "\n|" in text
+    def _transport_for(self, friend_id: str) -> Any:
+        if friend_id.startswith("peer:"):
+            return self.mesh
+        return self.transport
 
 
 __all__ = ["ChatSender"]

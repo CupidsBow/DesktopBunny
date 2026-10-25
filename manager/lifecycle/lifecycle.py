@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from manager.body.body import Body
 from manager.environment.environment import Environment
@@ -49,12 +49,15 @@ class Lifecycle:
         environment: Environment,
         snapshot_getter: Callable[[], BunnySnapshot | dict | None] | None = None,
         busy_seconds_getter: Callable[[], float] | None = None,
+        mesh: Any = None,
         now_fn: Callable[[], datetime] = now_local,
     ) -> None:
         self.config = config
         self.body = body
         self.environment = environment
         self.now_fn = now_fn
+        self.mesh = mesh
+        self._mesh_messages: list = []
         # 默认无快照；组合根（brain）注入 bot/bridge 的 BunnySnapshot 获取器。
         self._snapshot_getter = snapshot_getter or (lambda: None)
         # 默认不计忙碌；组合根（brain）注入活动/在途能力汇总的忙碌时长。
@@ -130,6 +133,7 @@ class Lifecycle:
                     detail=change.detail or str(change.signal),
                 )
             )
+        self._drive_mesh()
         return changes
 
     # ------------------------------------------------------------------
@@ -198,6 +202,26 @@ class Lifecycle:
         """累积本轮社交互动次数，供下一次状态推进结算身体。"""
         # brain.submit_event 收到 MESSAGE 事件时调用，保证社交电量在互动时被消耗。
         self._pending_interactions += max(0, int(count))
+
+    # ------------------------------------------------------------------
+    # 本地兔子网格（2 秒状态时钟顺带推进）
+    # ------------------------------------------------------------------
+    def _drive_mesh(self) -> None:
+        if self.mesh is None:
+            return
+        try:
+            self.mesh.heartbeat()
+        except Exception:
+            logger.exception("mesh 心跳失败")
+        try:
+            self._mesh_messages.extend(self.mesh.poll_inbox())
+        except Exception:
+            logger.exception("mesh 收件箱轮询失败")
+
+    def take_messages(self) -> list:
+        """取走本时钟拍内收到的本地兔子消息，交给 brain 转成 MESSAGE 事件。"""
+        messages, self._mesh_messages = self._mesh_messages, []
+        return messages
 
     # ------------------------------------------------------------------
     # 只读状态

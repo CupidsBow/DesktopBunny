@@ -10,7 +10,7 @@
 
 | 通路 | 实现 | 说明 |
 | --- | --- | --- |
-| 语言 | `transport.send_*` | 单聊/群聊，被动或主动 |
+| 语言 | `transport.send_message` | 私聊，被动或主动 |
 | 记忆 | `memory/*` | 情景写入、语义更新 |
 | 状态 | body / activity / lifecycle | 活动进度、事件账本、唤醒排程 |
 
@@ -46,9 +46,7 @@
 
 ### 2.2 会话类型
 
-- **c2c**：`friend_id == conversation_id == user_openid`。
-- **group**：走 `send_group_message`。
-- 发送目标以 Decision 的 `target.conversation_id`（缺省 `friend_id`）为准。
+- 只支持私聊：`friend_id == user_openid`，发送目标即 Decision 的 `target.friend_id`。
 
 ### 2.3 消息类型
 
@@ -60,7 +58,7 @@
 
 ## 3. 记忆写回
 
-- Decision 的 `remember` 字段（`text` + `valence`/`emotion`/`arousal`）→ 提交一条 L2 情景给 memory worker；`speaker`/`conversation`/`time` 由机制填充。
+- Decision 的 `remember` 字段（`text` + `valence`/`emotion`/`arousal`）→ 提交一条 L2 情景给 memory worker；`speaker`/`time` 由机制填充。
 - `tool.call(memory.write)` → 提交 L3 语义文件更新。
 - 所有记忆写入统一进 memory worker 队列，串行落盘。
 - 执行层只提交写操作，不决定内容与去重策略。

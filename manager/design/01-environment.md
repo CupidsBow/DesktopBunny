@@ -11,7 +11,7 @@
 | --- | --- |
 | 聚合周围环境成结构化快照 | 判断重要性、排序消息 |
 | 检测在场 / 空闲 / 前台窗口 | 决定是否唤醒 Alice |
-| 提供昼夜相位与系统状态 | 丢弃任何消息、推断朋友身份 |
+| 提供系统状态 | 丢弃任何消息、推断朋友身份 |
 
 环境层只产出数据。行为选择属于 [09-thinker](09-thinker.md)。
 
@@ -44,7 +44,6 @@ class EnvironmentState:
     idle_seconds: float | None       # 电脑前多久没人操作
     someone_present: bool | None     # idle_seconds < presence_idle_threshold
     foreground_title: str | None     # 前台窗口标题（不落盘）
-    at_night: bool                   # 昼夜相位
     system_state: dict               # 前台持续时长、网络、休眠恢复等
 ```
 
@@ -57,7 +56,7 @@ class EnvironmentState:
 | 消息 | QQ 网关 → `bot/qq_adapter.py` | 由适配器归一化为事件直接进事件队列；环境层不处理消息内容 |
 | 是否有人在 | `GetLastInputInfo`（ctypes） | 只回答"电脑前有没有人"，不猜测身份 |
 | 前台窗口 | `pywinctl` | 只取窗口标题原文；不落盘，只作粗比较 |
-| 时间 | 系统时钟 | 绝对时间、昼夜相位 |
+| 时间 | 系统时钟 | 绝对时间 |
 
 ---
 
@@ -95,7 +94,7 @@ class EnvironmentState:
 | --- | --- |
 | 读取不到空闲时长 | `someone_present = None`，情境里标注未知 |
 | 前台窗口无法识别 | `foreground_title` 为空，不触发改变检测 |
-| 系统时间跳变 | 重新计算昼夜相位，不补算欲望 |
+| 系统时间跳变 | 直接采用新时间 |
 
 降级信息必须如实出现在情境里，不伪造状态。
 

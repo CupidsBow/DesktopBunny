@@ -49,10 +49,10 @@ from manager.shared.types import (
     CapabilityCall,
     CapabilityErrorCode,
     CapabilityResult,
-    ConversationType,
     EnvironmentState,
     Event,
     EventKind,
+    EventSource,
     TurnState,
     WakePredicateType,
     WakeReason,
@@ -203,6 +203,9 @@ class Brain:
         busy_seconds_getter: Callable[[], float] | None = None,
         eat_handler: Callable[[str], bool] | None = None,
         now_fn: Callable[[], datetime] = now_local,
+        name: str = "Alice",
+        bunny_friends: list[str] | None = None,
+        mesh: Any = None,
         enable_logging: bool = True,
         log_level: int = logging.INFO,
     ) -> None:
@@ -221,6 +224,13 @@ class Brain:
             setup_logging(self.paths.logs_dir, log_level)
 
         self.now_fn = now_fn
+        self.name = name
+        self.bunny_friends = list(bunny_friends or [])
+        self.mesh = mesh
+        if self.mesh is not None:
+            self.mesh.heartbeat_seconds = config.peer_heartbeat_seconds
+            self.mesh.heartbeat_timeout = config.peer_heartbeat_timeout
+        self._known_peer_slugs: set[str] = set()
         self._started = False
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
@@ -246,7 +256,11 @@ class Brain:
             ActivityStore(self.paths.activities_path), config, now_fn=now_fn
         )
         self.body = Body(config, now_fn=now_fn)
-        self.environment = Environment(config, now_fn=now_fn)
+        self.environment = Environment(
+            config,
+            peers_getter=(self.mesh.discover if self.mesh is not None else None),
+            now_fn=now_fn,
+        )
         self.self_deriver = SelfStateDeriver(config)
 
         # 饱食度经 main.py 注入 bridge 快照；若另有组合根，需同样传入 snapshot_getter。
@@ -261,6 +275,7 @@ class Brain:
             environment=self.environment,
             snapshot_getter=self._snapshot_getter,
             busy_seconds_getter=self._busy_seconds_getter,
+            mesh=self.mesh,
             now_fn=now_fn,
         )
 
@@ -285,7 +300,7 @@ class Brain:
         )
 
         # --- 认知 / 执行 ---
-        self.chat_sender = ChatSender(config, transport)
+        self.chat_sender = ChatSender(config, transport, mesh=self.mesh)
         self.executor = Executor(
             config,
             memory=self.memory,
@@ -296,7 +311,7 @@ class Brain:
             now_fn=now_fn,
         )
         self.frame_generator = FrameGenerator(
-            config, self.memory, self.registry, now_fn=now_fn
+            self.memory, self.registry, now_fn=now_fn, name=name
         )
         self.thinker = Thinker(config, llm)
 
@@ -316,6 +331,8 @@ class Brain:
             return
         self._stop_event.clear()
         self.memory.start()
+        self._preload_bunny_friends()
+        self._baseline_peers()
         self.events.load()
         restored = self.activities.open_activities()
 
@@ -353,6 +370,19 @@ class Brain:
         self._started = True
         logger.info("Brain 已启动：%s", self.paths.root)
 
+    def _preload_bunny_friends(self) -> None:
+        """按 .env 的 BUNNY_FRIENDS 预建本地兔子朋友档案（仅首次，已有则跳过）。
+
+        friend_id 用 `peer:<名字>` 与来信一致；档案里 frontmatter 的 `name` 就是
+        这个 friend_id，LLM 从记忆里就能认出"这是老朋友"，无需 prompt 额外教前缀。
+        """
+        for friend_id in self.bunny_friends:
+            try:
+                if not self.memory.friend(friend_id).first_seen:
+                    self.memory.ensure_friend(friend_id)
+            except Exception:
+                logger.exception("预建兔子朋友档案失败：%s", friend_id)
+
     def stop(self, reason: str = "正常关闭") -> None:
         if not self._started:
             return
@@ -383,6 +413,9 @@ class Brain:
         for change in changes:
             self._add_event(EventKind.SIGNAL, change.to_payload())
             woke = True
+        for message in self.lifecycle.take_messages():
+            self._ingest_peer_message(message)
+        self._detect_peer_presence()
 
         fired = self._resume_watcher.check(
             self.activities,
@@ -442,6 +475,63 @@ class Brain:
         )
         return event
 
+    def _ingest_peer_message(self, message) -> None:
+        """本地兔子的 inbox 消息 → MESSAGE 事件（friend_id 用 ``peer:<slug>``）。"""
+        try:
+            self.submit_event(
+                Event(
+                    id="",
+                    kind=EventKind.MESSAGE,
+                    at=to_iso(self.now_fn()),
+                    source=EventSource(friend_id=f"peer:{message.from_slug}"),
+                    payload={
+                        "msg_id": message.msg_id,
+                        "text": message.text,
+                        "from_name": message.from_name,
+                    },
+                )
+            )
+        except Exception:
+            logger.exception(
+                "本地兔子消息入队失败：%s", getattr(message, "msg_id", "")
+            )
+
+    def _baseline_peers(self) -> None:
+        """启动时记住当前在线兔子，避免把"启动时对方已在"当成新上线。"""
+        if self.mesh is None:
+            self._known_peer_slugs = set()
+            return
+        try:
+            self._known_peer_slugs = {peer.slug for peer in self.mesh.discover()}
+        except Exception:
+            logger.exception("peer 基线失败")
+            self._known_peer_slugs = set()
+
+    def _detect_peer_presence(self) -> None:
+        """本地兔子从离线变在线时，发 SIGNAL 事件唤醒 LLM（有机会主动打招呼）。"""
+        if self.mesh is None:
+            return
+        current = {peer.slug for peer in self.lifecycle.environment_state.peers}
+        for slug in sorted(current - self._known_peer_slugs):
+            self._peer_online(slug)
+        self._known_peer_slugs = current
+
+    def _peer_online(self, slug: str) -> None:
+        logger.info("本地兔子上线：%s", slug)
+        self._add_event(
+            EventKind.SIGNAL,
+            {
+                "signal": "peer_online",
+                "from": "offline",
+                "to": "online",
+                "slug": slug,
+                "detail": f"本地兔子 {slug} 上线了",
+            },
+        )
+        self._notify(
+            WakeReason(kind=WakeReasonKind.EVENT, detail=f"本地兔子 {slug} 上线")
+        )
+
     def snapshot(self) -> dict[str, Any]:
         body = self.lifecycle.body_state
         environment = self.lifecycle.environment_state
@@ -450,7 +540,6 @@ class Brain:
             "satiety": body.satiety,
             "energy": body.energy,
             "social_battery": body.social_battery,
-            "circadian": body.circadian,
             "presence": body.presence,
             "someone_present": environment.someone_present,
             "activity": (
@@ -563,6 +652,11 @@ class Brain:
         now = self.now_fn()
         self._frame_counter += 1
         caller = f"frame_{self._frame_counter}"
+        total_unhandled = len(unhandled)
+        limit = int(self.config.inbox_max_events or 0)
+        if limit > 0 and len(unhandled) > limit:
+            unhandled = unhandled[-limit:]
+        dropped = total_unhandled - len(unhandled)
 
         body = BodyState.from_dict(self.lifecycle.body_state.to_dict())
         environment = EnvironmentState.from_dict(
@@ -645,12 +739,11 @@ class Brain:
         ):
             step_limit_reached = self.activities.record_step(active.id)
 
-        speaker, conversation = _speaker_for(decision, unhandled)
+        speaker = _speaker_for(decision, unhandled)
         _fill_reply_context(decision, unhandled)
         effect = self.executor.apply(
             decision,
             speaker=speaker,
-            conversation=conversation,
             caller=caller,
             at=now,
         )
@@ -697,6 +790,20 @@ class Brain:
             # 工具帧没有产生任何结果：避免停在无唤醒状态
             self._system_event(
                 "tool_call_empty", "tool.call 没有派发任何能力", wake=True
+            )
+
+        if (
+            dropped > 0
+            and decision.is_terminal
+            and decision.handled
+            and not self._is_busy()
+        ):
+            # 本帧因 inbox 上限只展示了最近一部分事件，且 LLM 已空闲：再唤醒一次继续消化剩余积压。
+            self._notify(
+                WakeReason(
+                    kind=WakeReasonKind.EVENT,
+                    detail="还有未处理事件，继续处理",
+                )
             )
 
     # ------------------------------------------------------------------
@@ -778,7 +885,7 @@ class Brain:
         if decision.action is Action.CHAT_REPLY and reply:
             latest = _latest_message(
                 events,
-                decision.target.conversation_id if decision.target else None,
+                decision.target.friend_id if decision.target else None,
             )
             try:
                 self.memory.record_turn(
@@ -900,50 +1007,39 @@ def _intent(decision) -> str:
 
 
 def _fill_reply_context(decision, events: list[Event]) -> None:
-    """把来信的 msg_id / 会话类型补进 target，保证被动回复命中窗口。"""
+    """把来信的 msg_id 补进 target，保证被动回复命中窗口。"""
     target = decision.target
     if target is None or decision.action not in (
         Action.CHAT_REPLY,
         Action.CHAT_REACH_OUT,
     ):
         return
-    message = _latest_message(events, target.conversation_id or target.friend_id)
+    message = _latest_message(events, target.friend_id)
     if message is None:
         return
     if target.msg_id is None:
         target.msg_id = message.payload.get("msg_id")
-    raw_type = message.payload.get("conversation_type")
-    if raw_type:
-        try:
-            target.conversation_type = ConversationType(raw_type)
-        except (ValueError, TypeError):
-            pass
 
 
 def _latest_message(
-    events: list[Event], conversation_id: str | None
+    events: list[Event], friend_id: str | None
 ) -> Event | None:
     for event in reversed(events):
         if event.kind is not EventKind.MESSAGE:
             continue
-        if conversation_id and (
-            event.source.conversation_id != conversation_id
-            and event.source.friend_id != conversation_id
-        ):
+        if friend_id and event.source.friend_id != friend_id:
             continue
         return event
     return None
 
 
-def _speaker_for(
-    decision, events: list[Event]
-) -> tuple[str | None, str | None]:
+def _speaker_for(decision, events: list[Event]) -> str | None:
     if decision.target is not None:
-        return decision.target.friend_id, decision.target.conversation_id
+        return decision.target.friend_id
     for event in reversed(events):
         if event.kind is EventKind.MESSAGE and event.source.friend_id:
-            return event.source.friend_id, event.source.conversation_id
-    return None, None
+            return event.source.friend_id
+    return None
 
 
 def _describe_reasons(reasons: list[WakeReason]) -> str:
@@ -961,10 +1057,7 @@ def _describe_decision(decision) -> str:
     parts = [decision.action.value]
     target = decision.target
     if target is not None:
-        parts.append(
-            f"target={target.friend_id}/{target.conversation_id}"
-            f"({target.conversation_type.value})"
-        )
+        parts.append(f"target={target.friend_id}")
     if decision.args:
         parts.append(f"args={_summarize(decision.args, 300)}")
     if decision.calls:

@@ -29,7 +29,7 @@
   "kind": "message | capability_done | capability_failed |
            activity_checkpoint | alarm | signal | system",
   "at": "2026-10-20T21:03:11+08:00",
-  "source": {"friend_id": "u_123", "conversation_id": "c_123"},
+  "source": {"friend_id": "u_123"},
   "payload": {"text": "在吗"},
   "arrived_during": {"type": "activity", "id": "act_17"},
   "status": "unhandled | handled"

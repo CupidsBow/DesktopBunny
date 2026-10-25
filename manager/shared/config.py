@@ -150,7 +150,7 @@ class BrainConfig:
     #: 身体状态落盘间隔（秒）；brain 在 tick 里按此节流保存 body.json。
     body_save_interval: float = 60.0
     #: 定期唤醒间隔：机械生物的基础心跳，也是唯一的兜底唤醒，与事件 / 闹钟 / 信号无关。
-    periodic_wake_seconds: float = 600.0
+    periodic_wake_seconds: float = 1200.0
     #: 单帧 inbox 上限：只取最近这么多条未处理事件；0 表示不限制。
     inbox_max_events: int = constants.INBOX_MAX_EVENTS
     next_wake_max_seconds: int = 86400

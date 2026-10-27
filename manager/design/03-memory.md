@@ -53,10 +53,13 @@ L0 是"基因"，不是人设卡。只保留三样无法从记忆推导的东西
 
 - 当前情境、当前回合的消息与工具结果。
 - 当前活动的目标、进度、已读内容摘要。
-- 最近若干轮对话原文。
+- 最近若干轮对话，存成结构化的 `{role, speaker, text, at}`，**以真正的多轮
+  messages 进入请求**（`assistant` 是她自己说的话，`user` 是对方带名字的一行）；
+  较早对话的滚动摘要放在情境的 `memories.recent_summary` 里。
 - 超过 `l1_context_max_chars` 时，把最早的一半压缩为摘要并提交 L2；不是简单丢弃。
 - 压缩是记忆整理，不产生行为 Decision；摘要可以使用 LLM，但结果只作为记忆写操作入队。
-- 摘要与最近对话写入 `state/l1.json`：`{"summary": ..., "turns": [...], "saved_at": ...}`。
+- 摘要与对话条目写入 `state/l1.json`：`{"summary": ..., "turns": [...], "saved_at": ...}`；
+  旧版把 `turns` 存成字符串行，读取时会转换成用户发言，不丢历史。
 - 每次 `record_turn` 和压缩成功应用后原子写入；`Memory.stop()` 再写一次。
 - 启动时无条件读取并恢复，不按 `saved_at` 判断过期，也没有关闭时间配置。
 - 文件缺失或损坏时按空 L1 启动；行数超过 `l1_hard_max_lines` 时只保留最近的部分。
@@ -145,7 +148,7 @@ memory/                         # Alice 的大脑
 3. 常驻的 `self.md`、`goals.md`、`preferences.md`。
 4. 索引行里带上 `valence`/`arousal`，供 LLM 判断哪些值得展开。
 
-**相关召回由装配层自动做。** 情境装配时，用本帧消息文本与当前活动目标当查询，调关键词召回，把 top N 作为 `memories.related` 一并给出（受 `recall_auto_limit` 与 `recall_auto_max_chars` 约束）。召回不再是能力，LLM 不需要"想起来去查"。不做向量检索、不做全文索引。
+**相关召回由装配层自动做。** 每帧用本帧消息文本与当前活动目标当查询，调关键词召回，取 top N（受 `recall_auto_limit` 与 `recall_auto_max_chars` 约束）。召回结果**单独作为一条消息**放在情境之前，读起来是"你刚才想起了几件旧事"，而不是参数表里的一个字段。召回不再是能力，LLM 不需要"想起来去查"。不做向量检索、不做全文索引。
 
 好友摘要（`memories.friends`）也随情境给出，按最近互动排序，最多 12 人。所以没有 `memory.read` / `memory.recall` 这类能力——该进 prompt 的东西不该藏在 tools 里。
 

@@ -53,7 +53,13 @@ class SituationBuilder:
         delivery: DeliveryStatus | None = None,
         now: datetime | None = None,
         notes: Iterable[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """装配情境。
+
+        Returns:
+            ``(situation, related)``：情境 JSON 与自动召回结果。
+            召回单独返回，因为它要作为一条独立消息发出，不埋在情境里。
+        """
         now = now or self.now_fn()
         unhandled = [event for event in events if not event.is_handled]
         speaker = _current_speaker(unhandled)
@@ -129,14 +135,13 @@ class SituationBuilder:
                 "speaker_last_seen": view.speaker_last_seen,
                 "index": [render_line(entry) for entry in view.index],
                 "friends": self._friend_lines(),
-                "related": related,
-                "recent_context": self.memory.recent_context(),
+                "recent_summary": self.memory.l1_summary,
             },
             "delivery": _delivery(delivery),
         }
         if notes:
             situation["notes"] = [str(note) for note in notes]
-        return situation
+        return situation, related
 
     # ------------------------------------------------------------------
     def _friend_lines(self) -> list[dict[str, Any]]:

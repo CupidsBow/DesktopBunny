@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from manager.shared.config import BrainConfig
 from manager.shared.jsonutil import extract_json
 from manager.shared.llm_client import LLMClient
 from manager.shared.timeutil import now_local, to_iso
+from manager.memory.turns import render_l1_turn
 
 if TYPE_CHECKING:  # pragma: no cover - 仅用于类型检查
     from manager.memory.memory import Memory
@@ -133,7 +134,7 @@ class L1Compressor:
         )
         return True
 
-    def _build_prompt(self, summary: str, chunk: list[str]) -> str:
+    def _build_prompt(self, summary: str, chunk: list[dict[str, Any]]) -> str:
         limit = max(50, int(self.config.l1_summary_max_chars))
         parts = [
             f"现在：{to_iso(self.now_fn())}",
@@ -142,7 +143,7 @@ class L1Compressor:
             summary.strip() or "（无）",
             "",
             "## 较早的对话原文",
-            "\n".join(chunk),
+            "\n".join(render_l1_turn(turn) for turn in chunk),
             "",
             f"请合并压缩：summary 不超过 {limit} 字，episode 不超过 300 字。",
         ]

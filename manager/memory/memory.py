@@ -7,12 +7,13 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from manager.memory.compression import L1Compressor
 from manager.memory.index import MemoryIndex
 from manager.memory.recall import Recall
 from manager.memory.store import MemoryStore
+from manager.memory.turns import render_l1_turn
 from manager.memory.worker import MemoryWorker
 from manager.shared.config import BrainConfig, BrainPaths
 from manager.shared.llm_client import LLMClient
@@ -28,8 +29,11 @@ from manager.shared.types import (
 
 logger = logging.getLogger(__name__)
 
+
 _INDEX_VIEW_LIMIT = 60
 _SUMMARY_LIMIT = 4096
+#: 每帧作为真正的多轮 messages 带上的对话条数。
+_L1_MESSAGE_TURNS = 12
 
 
 class Memory:
@@ -111,11 +115,29 @@ class Memory:
             summary = summary[:limit].rstrip() + "…"
 
         raw_turns = data.get("turns")
-        turns = (
-            [line for line in raw_turns if isinstance(line, str)]
-            if isinstance(raw_turns, list)
-            else []
-        )
+        turns: list[dict[str, Any]] = []
+        if isinstance(raw_turns, list):
+            for item in raw_turns:
+                if isinstance(item, dict) and str(item.get("text") or "").strip():
+                    turns.append(
+                        {
+                            "role": str(item.get("role") or "user"),
+                            "speaker": item.get("speaker"),
+                            "text": str(item.get("text") or "").strip(),
+                            "at": str(item.get("at") or ""),
+                        }
+                    )
+                elif isinstance(item, str) and item.strip():
+                    # 旧存档是 "[HH:MM] 谁: 说了什么" 的行；按用户发言收下，
+                    # 不丢历史，也不pretend 知道角色。
+                    turns.append(
+                        {
+                            "role": "user",
+                            "speaker": None,
+                            "text": item.strip(),
+                            "at": "",
+                        }
+                    )
         hard_limit = max(1, int(self.config.l1_hard_max_lines))
         if len(turns) > hard_limit:
             dropped = len(turns) - hard_limit
@@ -269,10 +291,10 @@ class Memory:
             return ""
 
     def recent_context(self, max_chars: int | None = None) -> str:
-        """L1：较早对话的压缩摘要 + 最近几轮对话原文，只存在内存。"""
+        """L1 的文本视图：较早对话的摘要 + 最近几轮对话。"""
         with self._buffer_lock:
             summary = self._l1_summary
-            lines = list(self._recent_turns)
+            lines = [render_l1_turn(turn) for turn in self._recent_turns]
         parts: list[str] = []
         if summary:
             parts.append("[较早对话摘要]\n" + summary)
@@ -290,6 +312,27 @@ class Memory:
                 text = text[newline + 1 :]
         return text
 
+    def turn_messages(self, limit: int = _L1_MESSAGE_TURNS) -> list[dict[str, str]]:
+        """把最近几轮对话还原成真正的多轮 messages。
+
+        之前这些内容是以一串字符串塞在情境 JSON 里的，模型看到的"自己说过的话"
+        是别人转述的。还原成 ``role=assistant`` 之后，接话、称呼、"我刚才说过"
+        都能直接对得上。
+        """
+        with self._buffer_lock:
+            turns = list(self._recent_turns)[-max(1, limit) :]
+        messages: list[dict[str, str]] = []
+        for turn in turns:
+            text = str(turn.get("text") or "").strip()
+            if not text:
+                continue
+            if turn.get("role") == "assistant":
+                messages.append({"role": "assistant", "content": text})
+            else:
+                who = str(turn.get("speaker") or "对方")
+                messages.append({"role": "user", "content": f"{who}：{text}"})
+        return messages
+
     # ------------------------------------------------------------------
     # L1 压缩（由 compression.L1Compressor 在后台调用）
     # ------------------------------------------------------------------
@@ -300,29 +343,35 @@ class Memory:
                 > self.config.l1_context_max_chars
             )
 
-    def l1_compression_snapshot(self) -> tuple[str, list[str]] | None:
+    @property
+    def l1_summary(self) -> str:
+        """较早对话的滚动摘要；多轮 messages 之外单独交给情境。"""
+        with self._buffer_lock:
+            return self._l1_summary
+
+    def l1_compression_snapshot(self) -> tuple[str, list[dict[str, Any]]] | None:
         """返回（已有摘要, 待压缩的最早一段对话）；未超限时返回 None。"""
         with self._buffer_lock:
-            lines = list(self._recent_turns)
+            turns = list(self._recent_turns)
             summary = self._l1_summary
-            total = self._l1_chars(summary, lines)
-            if total <= self.config.l1_context_max_chars or not lines:
+            total = self._l1_chars(summary, turns)
+            if total <= self.config.l1_context_max_chars or not turns:
                 return None
             # 目标：压缩后回到上限的一半左右；单次最多带一个上限的原文，
             # 避免一次调用塞进过长的提示词。
             need = max(1, total - self.config.l1_context_max_chars // 2)
-            chunk: list[str] = []
+            chunk: list[dict[str, Any]] = []
             size = 0
-            for line in lines:
-                chunk.append(line)
-                size += len(line) + 1
+            for turn in turns:
+                chunk.append(turn)
+                size += len(render_l1_turn(turn)) + 1
                 if size >= need or size >= self.config.l1_context_max_chars:
                     break
             if not chunk:
                 return None
             return summary, chunk
 
-    def apply_l1_compression(self, chunk: list[str], summary: str) -> bool:
+    def apply_l1_compression(self, chunk: list[dict[str, Any]], summary: str) -> bool:
         """用新摘要替换最早的一段对话；对话已变化时放弃本次结果。"""
         text = (summary or "").strip()
         if not chunk or not text:
@@ -357,8 +406,8 @@ class Memory:
         )
 
     @staticmethod
-    def _l1_chars(summary: str, lines: list[str]) -> int:
-        return len(summary) + sum(len(line) + 1 for line in lines)
+    def _l1_chars(summary: str, turns: list[dict[str, Any]]) -> int:
+        return len(summary) + sum(len(render_l1_turn(turn)) + 1 for turn in turns)
 
     # ------------------------------------------------------------------
     # 写入
@@ -375,10 +424,23 @@ class Memory:
         stamp = f"{at:%H:%M}"
         with self._buffer_lock:
             if user_text and user_text.strip():
-                who = speaker or "对方"
-                self._recent_turns.append(f"[{stamp}] {who}: {user_text.strip()}")
+                self._recent_turns.append(
+                    {
+                        "role": "user",
+                        "speaker": speaker,
+                        "text": user_text.strip(),
+                        "at": stamp,
+                    }
+                )
             if alice_text and alice_text.strip():
-                self._recent_turns.append(f"[{stamp}] Alice: {alice_text.strip()}")
+                self._recent_turns.append(
+                    {
+                        "role": "assistant",
+                        "speaker": None,
+                        "text": alice_text.strip(),
+                        "at": stamp,
+                    }
+                )
             self._trim_hard_limit_locked()
             overflow = (
                 self._l1_chars(self._l1_summary, self._recent_turns)

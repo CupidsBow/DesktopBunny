@@ -813,9 +813,13 @@ def test_related_memories_in_situation(tmpdir):
         QQAdapter(brain).submit_message("u_123", "m_2", "文章名字再发我一下")
         assert wait_until(lambda: len(llm.calls) >= 3), "第二帧未触发"
 
-        related = _situation(llm.calls[-1]).get("memories", {}).get("related", [])
-        assert related, "情境里没有自动召回的相关记忆"
-        assert any("文章" in str(item.get("summary")) for item in related)
+        recall = [
+            message["content"]
+            for message in llm.calls[-1]
+            if message["role"] == "user" and "你刚才想起了" in message["content"]
+        ]
+        assert recall, "没有把相关记忆作为独立消息发出去"
+        assert "文章" in recall[0], "召回内容里应包含关键词"
     finally:
         brain.stop("测试结束")
 
@@ -840,7 +844,8 @@ def test_memory_capabilities(tmpdir):
         ), "回复未发出"
         memories = _situation(llm.calls[-1]).get("memories", {})
         assert "friends" in memories, "情境缺少好友摘要"
-        assert "related" in memories, "情境缺少相关召回"
+        assert "recent_summary" in memories, "情境缺少 L1 摘要"
+        assert "related" not in memories, "召回应作为独立消息，不再埋在情境里"
     finally:
         brain.stop("测试结束")
 
@@ -1044,6 +1049,7 @@ def test_peer_address_in_situation(tmpdir):
 
     class _Memory:
         config = type("C", (), {"recall_auto_limit": 0, "recall_auto_max_chars": 0})()
+        l1_summary = ""
 
         def view(self, speaker=None):
             return type(
@@ -1070,7 +1076,7 @@ def test_peer_address_in_situation(tmpdir):
             return []
 
     builder = SituationBuilder(_Memory())
-    situation = builder.build(
+    situation, related = builder.build(
         environment=EnvironmentState(
             now=clock_now(), peers=[Peer(name="Bob", slug="Bob")]
         ),
@@ -1088,6 +1094,37 @@ def clock_now():
     from datetime import datetime
 
     return datetime(2026, 10, 28, 1, 0, 0).astimezone()
+
+
+def test_multi_turn_messages(tmpdir):
+    """最近对话以真正的多轮 messages 进入请求，而不是塞在情境字符串里。"""
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _reply("在的。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
+        assert wait_until(
+            lambda: any(m["text"] == "在的。" for m in transport.sent)
+        ), "回复未发出"
+
+        messages = llm.calls[-1]
+        roles = [message["role"] for message in messages]
+        assert roles[0] == "system"
+        assert roles[-1] == "user", "最后一轮必须带着当前情境"
+        assert "assistant" in roles, "她上一轮说的话应以 assistant 身份出现"
+        assert any(
+            message["role"] == "assistant" and "（启动）" in message["content"]
+            for message in messages
+        ), "启动帧的发言没进多轮历史"
+
+        situation = _situation(messages)
+        assert "recent_summary" in situation["memories"]
+        assert "recent_context" not in situation["memories"], "旧字段应已移除"
+    finally:
+        brain.stop("测试结束")
 
 
 def test_silent_idle_episode(tmpdir):
@@ -1147,6 +1184,7 @@ _TESTS = [
     ("探索回合留情景", test_exploration_leaves_episode),
     ("地址与文件名卫生", test_address_and_slug_hygiene),
     ("情境里的 peer 地址", test_peer_address_in_situation),
+    ("多轮 messages", test_multi_turn_messages),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),

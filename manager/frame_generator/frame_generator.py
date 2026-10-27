@@ -48,6 +48,7 @@ class FrameGenerator:
         personality_path: str | None = None,
     ) -> None:
         self._situation = SituationBuilder(memory, now_fn=now_fn, name=name)
+        self._memory = memory
         self._registry = registry
         #: 能力在启动时就固定了，工具表编译一次即可。
         self._tool_spec = build_tools(registry.as_dicts())
@@ -71,7 +72,7 @@ class FrameGenerator:
         now: datetime | None = None,
         notes: Iterable[str] | None = None,
     ) -> Frame:
-        situation = self._situation.build(
+        situation, related = self._situation.build(
             environment=environment,
             body=body,
             self_state=self_state,
@@ -86,6 +87,8 @@ class FrameGenerator:
         )
         messages = build_messages(
             situation,
+            turns=self._memory.turn_messages(),
+            related=related,
             name=self._name,
             personality=render_personality(self._name, self._personality_path),
         )

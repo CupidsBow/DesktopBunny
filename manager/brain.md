@@ -499,7 +499,7 @@ _run_frame:
 ```
 
 - 巩固是独立 LLM 任务：不读写当前回合 L1，不产出 Decision，只提交写操作批次。
-- L1 由情境装配读取；摘要与最近对话同步落盘到 `state/l1.json`。
+- L1 的最近对话以真正的多轮 messages 进入请求，摘要进情境的 `memories.recent_summary`；两者同步落盘到 `state/l1.json`。
 
 **F. 持久化与恢复**
 

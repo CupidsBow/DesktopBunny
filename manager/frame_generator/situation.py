@@ -102,7 +102,6 @@ class SituationBuilder:
                     if environment.idle_seconds is not None
                     else None
                 ),
-                "foreground_title": environment.foreground_title,
                 "system": environment.system_state,
                 "peers": [
                     {"name": peer.name, "slug": peer.slug}

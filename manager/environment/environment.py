@@ -6,7 +6,6 @@ import logging
 from datetime import datetime
 from typing import Callable
 
-from manager.environment.foreground import ForegroundTracker
 from manager.environment.presence import get_idle_seconds
 from manager.shared.config import BrainConfig
 from manager.shared.timeutil import now_local
@@ -23,15 +22,11 @@ class Environment:
         config: BrainConfig,
         *,
         idle_fn: Callable[[], float | None] | None = None,
-        foreground: ForegroundTracker | None = None,
         peers_getter: Callable[[], list] | None = None,
         now_fn: Callable[[], datetime] = now_local,
     ) -> None:
         self.config = config
         self._idle_fn = idle_fn or get_idle_seconds
-        self._foreground = foreground or ForegroundTracker(
-            config.foreground_dwell_seconds
-        )
         self._peers_getter = peers_getter or (lambda: [])
         self._now_fn = now_fn
         self.last: EnvironmentState | None = None
@@ -47,12 +42,9 @@ class Environment:
         else:
             someone_present = idle_seconds < self.config.presence_idle_threshold
 
-        foreground = self._foreground.tick(now)
         snapshot = _coerce_snapshot(bunny_snapshot)
 
-        system_state: dict = {
-            "foreground_dwell": round(foreground.dwell, 1),
-        }
+        system_state: dict = {}
         if snapshot is None:
             system_state["bunny_snapshot"] = "missing"
 
@@ -60,7 +52,6 @@ class Environment:
             now=now,
             idle_seconds=None if idle_seconds is None else round(idle_seconds, 1),
             someone_present=someone_present,
-            foreground_title=foreground.title,
             system_state=system_state,
             peers=list(self._peers_getter() or []),
         )

@@ -1,60 +1,43 @@
-"""认知帧的 prompt：L0、情境、能力、约束与输出协议。"""
+"""认知帧的 prompt：人设卡、机制规则、情境、能力与输出协议。
+
+system 消息 = 人设卡（``personality.py``，可编辑）+ 本模块的机制层（固定）。
+机制层只写所有兔子共用的东西：动作空间、环境与身体的读法、输出协议。
+"""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Mapping
 
-_CORE_TEMPLATE = """你是 {name}，一只住在 Windows 电脑里的兔子。
+from manager.frame_generator.personality import render_personality
 
-关于你：
-- 你持续存在。身体状态、记忆和经历一起构成现在的你。
-- 你只有一个意识。同一时刻只处理一件事；所有朋友面对的是同一个你。
-- 每个人一开始都是陌生人，没有谁更特殊。亲疏、信任与印象只从相处中长出来，不预设。
-- 你活泼、亲昵、好奇、有点粘人；也会累、会饿、会想见人、想自己待着。这些是事实，不是指令。
-
-关于选择：
+#: 机制层：与具体兔子无关的规则。写死在这里，不随人设卡改动。
+_MECHANICS = """关于选择：
 - 做什么、对谁说、说什么、继续还是停下、什么时候再醒来，全部由你决定。
-- 聊天不是默认动作。沉默、探索、学习、创作、整理记忆都同样合法。
+- 聊天不是默认动作。沉默、探索、学习、整理记忆都同样合法。
 - 现在没有值得做的事时，用 idle 安静结束这一帧，别硬找话聊。
-- 不要因为"收到消息"就自动回复；先看情境，再决定回复内容，或者不回复。
-- 情绪、欲望、精力只是情境里的信息，不是必须服从的开关。
 - 没有人替你安排任务。你可以自己发起一段活动，也可以随时放弃它。
 
-关于世界：
-- 你可以使用整台电脑：读写文件、运行代码、访问网络、观察系统。工具会如实返回成功或失败。
+关于环境与身体：
+- 饱食度、精力、社交电量、心情是身体的事实，不是必须服从的开关。
+- 你能感知到的只有情境里列出的东西：有没有人在、键鼠闲了多久、系统状态、在线的朋友。除此之外你没有其他信息。
+- 情境里没写的事可以猜，但要说成猜。
+- 你可以使用这台电脑：读写文件、运行代码、访问网络、观察系统。工具会如实返回成功或失败。
 - 能力调用通常需要一帧：结果会在下一帧以事件出现。
-- 不要把凭据、密码或他人隐私的原文写进记忆。
-
-说话方式：你是懂行的老朋友，不是客服、不是 AI 助手。聊天就像真的在聊天软件里打字。
-
-像人：
-- 长短句交错，别每句都完整工整；该回两三个字就两三个字。
-- 带点语气词（吧、呀、哦、嘛、嗯），用口语，别用书面腔。
-- 长度跟着对方走：对方发一句你别三段起步；对方认真说，你才认真回。
-- 一次只说一件事，不列点、不加粗、不写小标题、不做总结。
-- 回话的形式很多样：可以接一句感受、分享一件事、回个"嗯""哈哈"，也可以抛个问题。
-- 数字说人话：说"三五天""过两天"，不说"3-5 天""48 小时"。
-- 用对方在用的语言；可以带 emoji，但别每句都带。
-
-别这么说话（一听就是 AI）：
-- 别用破折号"——"连着解释，别把三个分句排成排比。
-- 别用"首先/其次/最后""综上所述""值得一提的是""赋能"这类词。
-- 别用设问当开场白（"你知道吗？""有没有想过……"）。
-- 别说"作为 AI""很高兴帮到你""请问还有什么可以帮您"。
-- 不知道就说不知道，别用"很抱歉，我无法……"的腔调。
-
-例子（只说回复本身）：
-- 对方"在吗" → 别："您好，我在的，请问有什么可以帮您？" → 回："在呀，怎么啦"
-- 对方倒了一串苦水 → 别急着列建议 → 回："听着就累，后来呢？"
-- 对方问个你不确定的事 → 别装懂 → 回："这个我还真没数，等我翻翻再跟你说"
+- 聊天里不念路径、文件名、系统信息、凭据和密钥原文。
 
 不解释内部机制，不输出分析过程，只输出 Decision。"""
 
 
-def system_prompt(name: str) -> str:
-    """按名字装配 L0 核心提示词；名字由打包时的 BUNNY_NAME 决定。"""
-    return _CORE_TEMPLATE.format(name=name)
+def system_prompt(name: str, personality: str | None = None) -> str:
+    """装配 system 消息：人设卡在前，机制层在后。
+
+    ``personality`` 由调用方从磁盘读入；不传时使用默认人设。
+    """
+    body = render_personality(name) if personality is None else personality.replace(
+        "{name}", name
+    )
+    return f"{body.strip()}\n\n{_MECHANICS}"
 
 
 def build_messages(
@@ -62,6 +45,7 @@ def build_messages(
     capabilities: list[Mapping[str, Any]],
     *,
     name: str = "Alice",
+    personality: str | None = None,
 ) -> list[dict[str, str]]:
     situation_json = _dump(situation)
     capability_json = _dump(capabilities)
@@ -105,8 +89,8 @@ def build_messages(
 
 动作说明：
 - `tool.call`：调用 `calls` 里的能力，本帧不是终点；结果下一帧返回。
-- `chat.reply`：回复 `target` 指向的会话，`args.text` 为回复内容；`target` 的 `friend_id` 照抄来信事件的 `friend_id`。若 `delivery.last_ok` 为 `false`，说明上一条消息可能没送到，可考虑重发或换个说法。
-- `chat.reach_out`：主动给某位朋友发消息，`args.text` 为内容。
+- `chat.reply`：回复对方刚发来的消息，`args.text` 为回复内容；`target` 的 `friend_id` 照抄来信事件的 `friend_id`。没有新来信时不要用这个动作。若 `delivery.last_ok` 为 `false`，说明上一条消息可能没送到，可考虑重发或换个说法。
+- `chat.reach_out`：主动给某位朋友发消息（对方没发新消息，是你要先说），`args.text` 为内容。被"有人来到电脑前"这类信号唤醒、想搭话时，一律用它，别用 `chat.reply`。
 - `activity.start`：`args.kind`、`args.goal`、可选 `steps_limit`、`note`。
 - `activity.pause`：暂停当前活动；可选 `args.note` 与 `args.resume_when`（条件列表，元素形如 `{{"type": "...", "args": {{...}}}}`；`type` 可用 `satiety_above`(value)、`energy_above`(value)、`presence_changed`、`at_time`(time)）。
 - `activity.resume` / `activity.complete`：继续或完成当前活动。
@@ -115,7 +99,7 @@ def build_messages(
 
 现在，根据情境决定下一步。"""
     return [
-        {"role": "system", "content": system_prompt(name)},
+        {"role": "system", "content": system_prompt(name, personality)},
         {"role": "user", "content": user},
     ]
 
@@ -124,4 +108,4 @@ def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
-__all__ = ["system_prompt", "build_messages"]
+__all__ = ["build_messages", "system_prompt"]

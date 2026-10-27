@@ -110,7 +110,14 @@ class LLMClient:
         message = data["choices"][0]["message"]
         content = message.get("content")
         if not content:
-            content = message.get("reasoning_content")
+            reasoning = message.get("reasoning_content")
+            if reasoning:
+                logger.warning(
+                    "LLM 返回空 content，退回 reasoning_content 兜底（%s 字）；"
+                    "这一段大概率不是可解析的 Decision",
+                    len(str(reasoning)),
+                )
+                content = reasoning
         if not content:
             raise LLMError("LLM 返回空内容")
         return str(content).strip()

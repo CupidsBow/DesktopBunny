@@ -311,7 +311,11 @@ class Brain:
             now_fn=now_fn,
         )
         self.frame_generator = FrameGenerator(
-            self.memory, self.registry, now_fn=now_fn, name=name
+            self.memory,
+            self.registry,
+            now_fn=now_fn,
+            name=name,
+            personality_path=self.paths.personality_path,
         )
         self.thinker = Thinker(config, llm)
 

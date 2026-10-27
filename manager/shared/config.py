@@ -53,6 +53,11 @@ class BrainPaths:
         return os.path.join(self.memory_dir, "preferences.md")
 
     @property
+    def personality_path(self) -> str:
+        """人设卡：身份与语气，可编辑；缺失时按默认人设生成。"""
+        return os.path.join(self.root, "personality.md")
+
+    @property
     def state_dir(self) -> str:
         return os.path.join(self.root, "state")
 
@@ -150,7 +155,7 @@ class BrainConfig:
     #: 身体状态落盘间隔（秒）；brain 在 tick 里按此节流保存 body.json。
     body_save_interval: float = 60.0
     #: 定期唤醒间隔：机械生物的基础心跳，也是唯一的兜底唤醒，与事件 / 闹钟 / 信号无关。
-    periodic_wake_seconds: float = 1200.0
+    periodic_wake_seconds: float = 1800.0
     #: 单帧 inbox 上限：只取最近这么多条未处理事件；0 表示不限制。
     inbox_max_events: int = constants.INBOX_MAX_EVENTS
     next_wake_max_seconds: int = 86400
@@ -160,7 +165,8 @@ class BrainConfig:
     )
     wake_hysteresis: float = 0.02
     presence_edge_debounce: float = 2.0
-    foreground_dwell_seconds: float = 30.0
+    #: 回到电脑前时，离开不足这么久（秒）不产生"有人来到"信号，避免短离开也被打招呼。
+    presence_greet_min_away_seconds: float = 900.0
     signal_coalesce_window: float = 5.0
     allowed_wake_predicates: tuple[str, ...] = (
         "satiety_below",

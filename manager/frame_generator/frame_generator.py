@@ -7,6 +7,10 @@ from datetime import datetime
 from typing import Any, Iterable
 
 from manager.capabilities.registry import CapabilityRegistry
+from manager.frame_generator.personality import (
+    ensure_personality_file,
+    render_personality,
+)
 from manager.frame_generator.prompt import build_messages
 from manager.frame_generator.situation import SituationBuilder
 from manager.memory.memory import Memory
@@ -39,10 +43,14 @@ class FrameGenerator:
         *,
         now_fn=now_local,
         name: str = "Alice",
+        personality_path: str | None = None,
     ) -> None:
         self._situation = SituationBuilder(memory, now_fn=now_fn, name=name)
         self._registry = registry
         self._name = name
+        self._personality_path = personality_path
+        if personality_path:
+            ensure_personality_file(personality_path)
 
     def build(
         self,
@@ -73,7 +81,10 @@ class FrameGenerator:
             notes=notes,
         )
         messages = build_messages(
-            situation, self._registry.as_dicts(), name=self._name
+            situation,
+            self._registry.as_dicts(),
+            name=self._name,
+            personality=render_personality(self._name, self._personality_path),
         )
         return Frame(situation=situation, messages=messages)
 

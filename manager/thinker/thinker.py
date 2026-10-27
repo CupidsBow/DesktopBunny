@@ -69,7 +69,12 @@ class Thinker:
             )
         except DecisionError as exc:
             first_error = exc
-            logger.info("Decision 解析失败，尝试修复：%s", exc)
+            logger.info(
+                "Decision 解析失败，尝试修复：%s｜原始输出 %s 字，前 200 字：%r",
+                exc,
+                len(raw),
+                raw[:200],
+            )
             if self.config.max_decision_repair <= 0:
                 return FrameResult(
                     decision=None,
@@ -98,6 +103,12 @@ class Thinker:
         try:
             decision = self.parser.parse(raw2, inbox_ids)
         except DecisionError as exc2:
+            logger.info(
+                "修复后仍不合法：%s｜原始输出 %s 字，前 200 字：%r",
+                exc2,
+                len(raw2),
+                raw2[:200],
+            )
             return FrameResult(
                 decision=None,
                 raw=raw2,

@@ -305,7 +305,8 @@ manager/
 ├── frame_generator/
 │   ├── frame_generator.py      # 帧生产者：聚合唤醒理由与只读视图
 │   ├── situation.py            # SituationBuilder
-│   └── prompt.py               # L0 + 情境 + 能力 + 输出协议
+│   ├── personality.py          # 人设卡：personality.md 的读取与默认值
+│   └── prompt.py               # 人设 + 机制层 + 情境 + 能力 + 输出协议
 ├── thinker/
 │   ├── thinker.py              # 调 LLM、解析并校验 Decision
 │   └── decision.py             # DecisionParser / repair_message

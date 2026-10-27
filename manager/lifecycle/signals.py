@@ -2,7 +2,6 @@
 
 从旧 ``manager/mechanism/signals.py`` 移植，按新身体/环境模型裁剪：
 - 删除警觉度（``alertness`` 已从 ``BodyState`` 移除）；
-- 前台从「应用类别」改为「窗口标题」原文比较；
 - 感知类型从 ``Perception`` 改为 ``EnvironmentState``。
 """
 
@@ -28,6 +27,7 @@ class SignalDetector:
         self._last_emit: dict[str, float] = {}
         self._energy_samples: Deque[tuple[float, float]] = deque()
         self._last_presence_edge = 0.0
+        self._last_presence_left_monotonic = time.monotonic()
 
     def evaluate(
         self,
@@ -44,7 +44,6 @@ class SignalDetector:
             self._social(changes, prev_body.social_battery, body.social_battery)
         if prev_environment is not None:
             self._presence(changes, prev_environment, environment)
-            self._foreground(changes, prev_environment, environment)
         self._energy_samples.append((time.monotonic(), body.energy))
         cutoff = time.monotonic() - 600
         while self._energy_samples and self._energy_samples[0][0] < cutoff:
@@ -122,36 +121,22 @@ class SignalDetector:
         if now - self._last_presence_edge < self.config.presence_edge_debounce:
             return
         self._last_presence_edge = now
+        if current.someone_present:
+            # 回到电脑前：离开够久才值得打招呼，短离开静默不打扰。
+            away = now - self._last_presence_left_monotonic
+            if away < self.config.presence_greet_min_away_seconds:
+                return
+            detail = f"有人来到电脑前（离开了约 {int(away / 60)} 分钟）"
+        else:
+            self._last_presence_left_monotonic = now
+            detail = "人离开了电脑"
         changes.append(
             SignalChange(
                 signal=SignalName.PRESENCE,
                 from_value=previous.someone_present,
                 to_value=current.someone_present,
-                detail="有人来到电脑前" if current.someone_present else "人离开了电脑",
+                detail=detail,
             )
         )
-
-    def _foreground(
-        self,
-        changes: list[SignalChange],
-        previous: EnvironmentState,
-        current: EnvironmentState,
-    ) -> None:
-        if not previous.foreground_title or not current.foreground_title:
-            return
-        if previous.foreground_title == current.foreground_title:
-            return
-        dwell = float((current.system_state or {}).get("foreground_dwell") or 0)
-        if dwell < self.config.foreground_dwell_seconds:
-            return
-        changes.append(
-            SignalChange(
-                signal=SignalName.FOREGROUND_TITLE,
-                from_value=previous.foreground_title,
-                to_value=current.foreground_title,
-                detail="前台窗口改变",
-            )
-        )
-
 
 __all__ = ["SignalDetector"]

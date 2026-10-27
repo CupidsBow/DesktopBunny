@@ -170,7 +170,6 @@ class SignalName(StrEnum):
     ENERGY = "energy"
     SOCIAL_BATTERY = "social_battery"
     PRESENCE = "presence"
-    FOREGROUND_TITLE = "foreground_title"
 
 
 class CapabilityErrorCode(StrEnum):
@@ -569,7 +568,6 @@ class EnvironmentState(DataModel):
     now: datetime
     idle_seconds: float | None = None
     someone_present: bool | None = None
-    foreground_title: str | None = None
     system_state: JSON = field(default_factory=dict)
     peers: list[Peer] = field(default_factory=list)
 
@@ -582,7 +580,6 @@ class EnvironmentState(DataModel):
             now=now,
             idle_seconds=data.get("idle_seconds"),
             someone_present=data.get("someone_present"),
-            foreground_title=data.get("foreground_title"),
             system_state=dict(data.get("system_state") or {}),
             peers=[Peer.from_dict(item) for item in (data.get("peers") or [])],
         )

@@ -27,12 +27,19 @@ class DecisionParser:
     def parse(
         self, raw: str, inbox_ids: Iterable[str] | None = None
     ) -> Decision:
+        """从文本里抠 JSON 再校验。工具调用走 :meth:`parse_mapping`。"""
         try:
             data = extract_json(raw)
         except ValueError as exc:
             raise DecisionError(f"输出不是可解析的 JSON：{exc}") from exc
         if not isinstance(data, Mapping):
             raise DecisionError("Decision 必须是 JSON 对象")
+        return self.parse_mapping(data, inbox_ids)
+
+    def parse_mapping(
+        self, data: Mapping[str, Any], inbox_ids: Iterable[str] | None = None
+    ) -> Decision:
+        """校验一份 Decision 字典（来自工具调用映射或文本解析）。"""
         try:
             decision = Decision.from_dict(data)
         except (AttributeError, TypeError, ValueError) as exc:
@@ -118,16 +125,4 @@ class DecisionParser:
             decision.wake_when = []
 
 
-def repair_message(raw: str, error: Exception) -> str:
-    return (
-        "上一条输出无法作为 Decision 执行。\n"
-        f"错误：{error}\n"
-        "请只输出一个完整、合法的 JSON 对象，不要解释、不要代码块以外的东西。\n"
-        "动作只能是：tool.call、chat.reply、chat.reach_out、activity.start、"
-        "activity.pause、activity.resume、activity.complete、activity.abandon、"
-        "idle。\n"
-        f"原始输出：\n{raw[:4000]}"
-    )
-
-
-__all__ = ["DecisionParser", "repair_message"]
+__all__ = ["DecisionParser"]

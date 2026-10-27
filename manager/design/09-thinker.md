@@ -47,6 +47,10 @@
 
 ## 3. 决策协议
 
+模型不输出 JSON，而是**调用工具**：能力一个工具、动作一个工具，共 19 个。
+`shared/tools_spec.py` 把返回的 `tool_calls` 翻译成下面这个内部信封，再交给
+`DecisionParser` 做同一套校验（动作枚举、参数范围、事件引用、钳制）。
+
 ```json
 {
   "action": "chat.reply",

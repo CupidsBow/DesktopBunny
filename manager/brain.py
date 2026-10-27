@@ -16,7 +16,7 @@ import logging
 import threading
 import traceback
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from manager.activity.activity import ActivityService
 from manager.activity.store import ActivityStore
@@ -243,6 +243,8 @@ class Brain:
         self._frame_failures = 0
         self._retry_at: datetime | None = None
         self._turn = TurnState()
+        #: 本回合用过的工具（"fs.read 刷钱机.txt"），终态帧写情景时带上。
+        self._turn_trail: list[str] = []
         self._last_body_save = now_fn()
         self._episodes_cache: list = []
         self._episodes_at: datetime | None = None
@@ -743,6 +745,7 @@ class Brain:
 
         if turn.frames_used == 0:
             turn.intent = _intent(decision)
+            self._turn_trail = []
         turn.frames_used += 1
 
         step_limit_reached = False
@@ -779,6 +782,7 @@ class Brain:
 
         self.events.mark_handled(decision.handled)
         self._record_turns(decision, effect, unhandled, speaker, now)
+        self._turn_trail.extend(_trail_steps(decision))
 
         if decision.is_terminal:
             self._turn = TurnState()
@@ -789,10 +793,12 @@ class Brain:
                 unhandled,
                 speaker,
                 now,
+                trail=self._turn_trail,
                 startup=any(
                     reason.kind is WakeReasonKind.STARTUP for reason in reasons
                 ),
             )
+            self._turn_trail = []
         else:
             turn.pending_tool_results = list(effect.capability_results)
             self._turn = turn
@@ -946,12 +952,16 @@ class Brain:
         speaker: str | None,
         now: datetime,
         *,
+        trail: Sequence[str] = (),
         startup: bool = False,
     ) -> None:
         """终态帧结束后由机制写一条 L2 情景。
 
         事实由 :func:`compose_episode` 从这一帧的决策与事件里拼；
         情绪取当帧派生出的 ``SelfState``，不由模型自报。
+
+        ``trail`` 是本回合用过的工具；没有它，一整轮"翻翻看看然后 idle"
+        会什么都不留下。
 
         启动帧不写：每次重启都留一条"开机说了句话"，只会污染记忆。
         """
@@ -963,6 +973,7 @@ class Brain:
             events=events,
             activity=effect.activity,
             errors=effect.errors,
+            trail=trail,
         )
         if composed is None:
             return
@@ -1075,6 +1086,20 @@ def _describe_event(event: Event) -> str:
     if event.kind is EventKind.SIGNAL:
         return f"signal: {event.payload.get('signal', '?')}"
     return f"{event.kind.value}: {event.payload.get('event', event.id)}"
+
+
+def _trail_steps(decision) -> list[str]:
+    """把一帧的能力调用压成短标签，供情景的"过程"行使用。"""
+    steps: list[str] = []
+    for call in decision.calls:
+        detail = ""
+        for value in (call.args or {}).values():
+            text = str(value).strip()
+            if text:
+                detail = text.replace("\\", "/").rsplit("/", 1)[-1][:30]
+                break
+        steps.append(f"{call.capability} {detail}".strip())
+    return steps
 
 
 def _intent(decision) -> str:

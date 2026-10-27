@@ -85,26 +85,107 @@ def _target_from(event: dict) -> dict:
 
 
 class FakeLLM:
-    """脚本化 LLM：认知帧按脚本顺序出决策；记忆整理类 prompt 返回空操作。"""
+    """脚本化 LLM：认知帧按脚本顺序出决策；记忆整理类 prompt 返回空操作。
+
+    认知帧走 ``complete()``：脚本里的 Decision 字典会被翻译成一次工具调用，
+    跟真实模型返回的 ``tool_calls`` 同构。返回字符串则表示"模型什么都没调用"。
+    """
 
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.last_tools = None
+        self.last_json_mode = None
 
     def chat(self, messages, timeout=None, temperature=None, json_mode=False):
         self.calls.append(list(messages))
-        self.last_json_mode = json_mode
         system = messages[0]["content"] if messages else ""
         if "记忆整理程序" in system:
             return '{"operations": []}'
+        item = self.script.pop(0) if self.script else {}
+        return item(messages) if callable(item) else json.dumps(item, ensure_ascii=False)
+
+    def complete(
+        self,
+        messages,
+        *,
+        tools=None,
+        tool_choice=None,
+        timeout=None,
+        temperature=None,
+        json_mode=False,
+    ):
+        self.calls.append(list(messages))
+        self.last_tools = tools
+        self.last_json_mode = json_mode
+        system = messages[0]["content"] if messages else ""
+        if "记忆整理程序" in system:
+            return {"content": '{"operations": []}'}
         if not self.script:
             raise AssertionError("FakeLLM 脚本耗尽（多出一次认知帧）")
         item = self.script.pop(0)
-        return (
-            item(messages)
-            if callable(item)
-            else json.dumps(item, ensure_ascii=False)
-        )
+        decision = item(messages) if callable(item) else item
+        if isinstance(decision, str):
+            try:
+                decision = json.loads(decision)
+            except ValueError:
+                # 模拟模型什么都没调用、只吐了一段坏文本
+                return {"content": decision}
+        return {"content": "", "tool_calls": _tool_calls(decision)}
+
+
+_ACTION_TO_TOOL = {
+    "chat.reply": "chat_reply",
+    "chat.reach_out": "chat_reach_out",
+    "activity.start": "activity_start",
+    "activity.pause": "activity_pause",
+    "activity.resume": "activity_resume",
+    "activity.complete": "activity_complete",
+    "activity.abandon": "activity_abandon",
+    "idle": "idle",
+}
+
+_META_KEYS = ("handled", "next_wake_in", "wake_when", "activity_update")
+
+
+def _call(name, args, index):
+    return {
+        "id": f"call_{index}",
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(args, ensure_ascii=False),
+        },
+    }
+
+
+def _meta(decision):
+    return {
+        key: decision[key]
+        for key in _META_KEYS
+        if decision.get(key) is not None
+    }
+
+
+def _tool_calls(decision):
+    """把脚本里的 Decision 字典翻译成 tool_calls。"""
+    action = decision["action"]
+    if action == "tool.call":
+        calls = []
+        for index, call in enumerate(decision.get("calls") or [], start=1):
+            args = dict(call.get("args") or {})
+            args.update(_meta(decision))
+            calls.append(
+                _call(str(call["capability"]).replace(".", "_"), args, index)
+            )
+        return calls
+
+    args = dict(decision.get("args") or {})
+    target = decision.get("target") or {}
+    if target.get("friend_id"):
+        args["friend_id"] = target["friend_id"]
+    args.update(_meta(decision))
+    return [_call(_ACTION_TO_TOOL[action], args, 1)]
 
 
 class FakeTransport:
@@ -801,6 +882,119 @@ def test_llm_client_json_mode(tmpdir):
         mod.requests.post = original
 
 
+def test_tool_mapping(tmpdir):
+    """工具表编译与 tool_calls → Decision 的映射。"""
+    from manager.shared.tools_spec import build_tools, decision_mapping
+
+    spec = build_tools(
+        [
+            {
+                "name": "web.search",
+                "description": "搜网页",
+                "schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+            {"name": "eat", "description": "吃东西", "schema": {"type": "object"}},
+        ]
+    )
+    names = [tool["function"]["name"] for tool in spec.tools]
+    assert "web_search" in names, "点号应换下划线"
+    assert "web.search" not in names, "工具名不能带点"
+    assert "chat_reply" in names and "idle" in names, "动作工具缺失"
+
+    search = next(t for t in spec.tools if t["function"]["name"] == "web_search")
+    assert search["function"]["parameters"]["required"] == ["query"], "required 丢了"
+
+    mapping = decision_mapping(
+        [
+            {
+                "function": {
+                    "name": "web_search",
+                    "arguments": '{"query": "小模型", "handled": ["ev_1"]}',
+                }
+            }
+        ],
+        spec,
+    )
+    assert mapping["action"] == "tool.call"
+    assert mapping["calls"] == [{"capability": "web.search", "args": {"query": "小模型"}}]
+    assert mapping["handled"] == ["ev_1"], "handled 应从参数里提取并从能力参数中剥掉"
+
+    mapping = decision_mapping(
+        [
+            {
+                "function": {
+                    "name": "chat_reply",
+                    "arguments": '{"friend_id": "u_1", "text": "在", "next_wake_in": 30}',
+                }
+            }
+        ],
+        spec,
+    )
+    assert mapping["action"] == "chat.reply"
+    assert mapping["target"] == {"friend_id": "u_1"}
+    assert mapping["args"] == {"text": "在"}, "friend_id 不该混进 args"
+    assert mapping["next_wake_in"] == 30
+
+    for bad in (
+        [],  # 什么都没调
+        [{"function": {"name": "nope", "arguments": "{}"}}],  # 未知工具
+        [  # 动作与能力混用
+            {"function": {"name": "idle", "arguments": "{}"}},
+            {"function": {"name": "eat", "arguments": "{}"}},
+        ],
+    ):
+        try:
+            decision_mapping(bad, spec)
+        except ValueError:
+            continue
+        raise AssertionError(f"应当拒绝：{bad}")
+
+
+def test_exploration_leaves_episode(tmpdir):
+    """只用工具翻东西、最后 idle 收尾的回合，也要留一条情景。"""
+    clock = Clock()
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            _tool_call("fs.list", {"path": "C:/Users"}),
+            _idle(),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        brain.submit_event(
+            Event(
+                id="",
+                kind=EventKind.SYSTEM,
+                at=to_iso(clock.now()),
+                payload={"event": "wake_for_test"},
+            )
+        )
+
+        def explored():
+            return any(
+                "探索" in episode.description
+                for episode in brain.memory.store.list_episodes()
+            )
+
+        assert wait_until(explored), "探索回合没有留下情景"
+        episode = next(
+            episode
+            for episode in brain.memory.store.list_episodes()
+            if "探索" in episode.description
+        )
+        assert "fs.list" in episode.body, "情景正文里应带上用过的工具"
+    finally:
+        brain.stop("测试结束")
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -855,10 +1049,12 @@ _TESTS = [
     ("终态帧自动写入情景", test_auto_episode),
     ("启动帧不写情景", test_startup_writes_no_episode),
     ("沉默的 idle 留痕但不记发呆", test_silent_idle_episode),
+    ("探索回合留情景", test_exploration_leaves_episode),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),
     ("JSON 模式与降级", test_llm_client_json_mode),
+    ("工具表与调用映射", test_tool_mapping),
 ]
 
 

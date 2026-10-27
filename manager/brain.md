@@ -303,7 +303,7 @@ manager/
 │   ├── frame_generator.py      # 帧生产者：聚合唤醒理由与只读视图
 │   ├── situation.py            # SituationBuilder
 │   ├── personality.py          # 人设卡：personality.md 的读取与默认值
-│   └── prompt.py               # 人设 + 机制层 + 情境 + 能力 + 输出协议
+│   └── prompt.py               # 人设 + 机制层 + 情境（能力与协议走 tools 参数）
 ├── thinker/
 │   ├── thinker.py              # 调 LLM、解析并校验 Decision
 │   └── decision.py             # DecisionParser / repair_message
@@ -398,7 +398,8 @@ main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator
 | --- | --- | --- | --- |
 | `frame_generator/frame_generator.py` | 聚合唤醒理由与只读视图，产出一帧 | 唤醒理由、各模块只读视图 | 一帧数据 |
 | `frame_generator/situation.py` | 装配情境：环境、身体、自我、记忆、活动、收件箱、能力、约束 | 各模块只读视图 | `Situation` |
-| `frame_generator/prompt.py` | 组装 L0、情境 JSON、能力 schema、约束、输出协议 | `Situation`、能力 schema | `messages` |
+| `frame_generator/prompt.py` | 组装 L0 与情境 JSON | `Situation`、人设 | `messages` |
+| `shared/tools_spec.py` | 把能力与动作编译成工具表；`tool_calls` → Decision 字典 | 能力清单、`tool_calls` | 工具表、Decision 字典 |
 | `thinker/thinker.py` | 执行一次认知：调 LLM、解析并校验 Decision | 一帧 | `Decision` + 帧状态 |
 | `thinker/decision.py` | 从文本提取 JSON，校验字段/动作/参数，钳制范围 | 原始文本、事件 id 集合 | `Decision` 或 `DecisionError` |
 | `executor/executor.py` | 按固定顺序把 Decision 落地；不修改 Decision | `Decision` | 发送、活动/状态更新、记忆提交、唤醒排程 |
@@ -581,6 +582,8 @@ event_queue / lifecycle / activity / body 各自原子写盘
 
 ### 7.2 决策信封
 
+模型不再输出这段 JSON：它**调用工具**，`shared/tools_spec.py` 把 `tool_calls` 翻译成下面这个内部结构，再交给 `DecisionParser` 校验。信封留在内部，是为了让校验与执行只有一份实现。
+
 ```json
 {
   "action": "chat.reply",
@@ -619,7 +622,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
 ### 7.3 状态与记忆写入
 
 - **状态**：身体量由身体模块更新；情绪/态度/欲望是派生值，不落盘。
-- **情景**：终态帧结束后，`memory/frame_episode.py` 从"这一帧真正发生的事"拼一条 L2：回复了谁、说了什么、结束了什么活动、处理了哪些事件。情绪打分取自当帧派生的 `SelfState`（`mood` / `mood_label` / 最强欲望的 `level`），不由模型自报。纯发呆（没有事件、没有动作）不写；启动帧也不写（否则每次重启都留一条"开机说了句话"）。
+- **情景**：终态帧结束后，`memory/frame_episode.py` 从"这一帧真正发生的事"拼一条 L2：回复了谁、说了什么、结束了什么活动、处理了哪些事件。情绪打分取自当帧派生的 `SelfState`（`mood` / `mood_label` / 最强欲望的 `level`），不由模型自报。纯发呆（没有事件、没有动作）不写；启动帧也不写（否则每次重启都留一条"开机说了句话"）。只用工具翻东西、最后 `idle` 收尾的回合**会**写一条"探索：fs.list …"，并附上过程行——否则一整轮探索会随 idle 蒸发。
 - **语义**：`memory.*` 能力可以改 `self.md` / `goals.md` / `preferences.md` / 好友档案，但不能直接写 `episodes/`。
 - 所有写入经 memory worker 串行落盘与更新索引。
 - **活动**：由活动模块持久化；LLM 通过 `activity.*` 动作改变其状态。

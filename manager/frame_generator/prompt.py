@@ -1,7 +1,7 @@
-"""认知帧的 prompt：人设卡、机制规则、情境、能力与输出协议。
+"""认知帧的 prompt：人设卡、机制规则、情境。
 
 system 消息 = 人设卡（``personality.py``，可编辑）+ 本模块的机制层（固定）。
-机制层只写所有兔子共用的东西：动作空间、环境与身体的读法、输出协议。
+user 消息只剩情境——能力清单与输出协议改由 API 的 tools 参数约束，不再拼进文本。
 """
 
 from __future__ import annotations
@@ -26,7 +26,12 @@ _MECHANICS = """关于选择：
 - 能力调用通常需要一帧：结果会在下一帧以事件出现。
 - 聊天里不念路径、文件名、系统信息、凭据和密钥原文。
 
-不解释内部机制，不输出分析过程，只输出 Decision。"""
+关于怎么行动：
+- 每帧只能调用一个工具。工具就是你的决定，不需要额外解释。
+- 能力工具（如 web_search）是用一件工具，结果下一帧回来；动作工具（如 chat_reply、idle）结束这一帧。
+- 不要把工具名和参数写成文字，直接调用。
+
+不解释内部机制，不输出分析过程。"""
 
 
 def system_prompt(name: str, personality: str | None = None) -> str:
@@ -42,60 +47,18 @@ def system_prompt(name: str, personality: str | None = None) -> str:
 
 def build_messages(
     situation: Mapping[str, Any],
-    capabilities: list[Mapping[str, Any]],
     *,
     name: str = "Alice",
     personality: str | None = None,
 ) -> list[dict[str, str]]:
-    situation_json = _dump(situation)
-    capability_json = _dump(capabilities)
+    """装配一帧的消息。能力与协议走 tools 参数，这里只给情境。"""
     user = f"""## 当前情境
 
 ```json
-{situation_json}
+{_dump(situation)}
 ```
 
-## 可用能力
-
-```json
-{capability_json}
-```
-
-## 输出协议
-
-只输出一个 JSON 对象，不要解释，不要 Markdown 代码块。一次只输出一个 Decision。
-
-```json
-{{
-  "action": "tool.call | chat.reply | chat.reach_out | activity.start |
-             activity.pause | activity.resume | activity.complete |
-             activity.abandon | idle",
-  "target": {{"friend_id": "u_123"}},
-  "args": {{}},
-  "calls": [{{"capability": "web.search", "args": {{"query": "..."}}}}],
-  "activity_update": {{"progress": 0.4, "last_result": "...", "note": "..."}},
-  "handled": ["ev_000123"],
-  "next_wake_in": 30,
-  "wake_when": []
-}}
-```
-
-字段说明：
-- `next_wake_in`：单位秒；会被限制到 0 ~ 24 小时。
-- `wake_when`：唤醒条件列表，元素形如 `{{"type": "...", "args": {{...}}}}`；`type` 可用 `satiety_below`(value)、`energy_below`(value)、`presence_changed`、`at_time`(time)、`activity_checkpoint`。
-- `handled`：填你已经处理完的事件 id；没填的会继续出现在下一帧。
-
-动作说明：
-- `tool.call`：调用 `calls` 里的能力，本帧不是终点；结果下一帧返回。
-- `chat.reply`：回复对方刚发来的消息，`args.text` 为回复内容；`target` 的 `friend_id` 照抄来信事件的 `friend_id`。没有新来信时不要用这个动作。若 `delivery.last_ok` 为 `false`，说明上一条消息可能没送到，可考虑重发或换个说法。
-- `chat.reach_out`：主动给某位朋友发消息（对方没发新消息，是你要先说），`args.text` 为内容。被"有人来到电脑前"这类信号唤醒、想搭话时，一律用它，别用 `chat.reply`。
-- `activity.start`：`args.kind`、`args.goal`、可选 `steps_limit`、`note`。
-- `activity.pause`：暂停当前活动；可选 `args.note` 与 `args.resume_when`（条件列表，元素形如 `{{"type": "...", "args": {{...}}}}`；`type` 可用 `satiety_above`(value)、`energy_above`(value)、`presence_changed`、`at_time`(time)）。
-- `activity.resume` / `activity.complete`：继续或完成当前活动。
-- `activity.abandon`：结束当前活动，`args.outcome` 为 `completed` 或 `abandoned`。
-- `idle`：这一帧什么都不做，直接结束；可带 `next_wake_in` 表示多久后再看。
-
-现在，根据情境决定下一步。"""
+现在，根据情境调用一个工具。"""
     return [
         {"role": "system", "content": system_prompt(name, personality)},
         {"role": "user", "content": user},

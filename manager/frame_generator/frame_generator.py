@@ -14,6 +14,7 @@ from manager.frame_generator.personality import (
 from manager.frame_generator.prompt import build_messages
 from manager.frame_generator.situation import SituationBuilder
 from manager.memory.memory import Memory
+from manager.shared.tools_spec import ToolSpec, build_tools
 from manager.shared.timeutil import now_local
 from manager.shared.types import (
     Activity,
@@ -29,10 +30,11 @@ from manager.shared.types import (
 
 @dataclass
 class Frame:
-    """一次认知输入：情境报告 + 待发送给 LLM 的消息。"""
+    """一次认知输入：情境报告 + 待发送的消息 + 本轮可用的工具表。"""
 
     situation: dict[str, Any]
     messages: list[dict[str, str]]
+    tool_spec: ToolSpec
 
 
 class FrameGenerator:
@@ -47,6 +49,8 @@ class FrameGenerator:
     ) -> None:
         self._situation = SituationBuilder(memory, now_fn=now_fn, name=name)
         self._registry = registry
+        #: 能力在启动时就固定了，工具表编译一次即可。
+        self._tool_spec = build_tools(registry.as_dicts())
         self._name = name
         self._personality_path = personality_path
         if personality_path:
@@ -82,11 +86,14 @@ class FrameGenerator:
         )
         messages = build_messages(
             situation,
-            self._registry.as_dicts(),
             name=self._name,
             personality=render_personality(self._name, self._personality_path),
         )
-        return Frame(situation=situation, messages=messages)
+        return Frame(
+            situation=situation,
+            messages=messages,
+            tool_spec=self._tool_spec,
+        )
 
 
 __all__ = ["Frame", "FrameGenerator"]

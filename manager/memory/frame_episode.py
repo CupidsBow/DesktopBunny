@@ -48,16 +48,24 @@ def compose_episode(
     events: Sequence[Event] = (),
     activity: Activity | None = None,
     errors: Sequence[str] = (),
+    trail: Sequence[str] = (),
 ) -> tuple[str, str] | None:
     """把一帧的结果压成一条情景；没有值得记的事时返回 ``None``。
+
+    ``trail`` 是本回合用过的工具（``fs.read 刷钱机.txt`` 这样的短标签）。
+    有它就能给"翻了一会儿东西、什么也没说"的探索留一条痕——
+    否则一整轮探索会随 idle 一起蒸发。
 
     Returns:
         ``(description, content)``：一行摘要与正文。
     """
     handled = _handled_lines(events)
+    steps = [str(step).strip() for step in trail if str(step).strip()]
     described = _describe(decision, speaker, activity)
     if described is None:
         described = _describe_silence(decision, events)
+    if described is None and steps:
+        described = _describe_exploration(steps)
     if described is None:
         return None
     description, content = described
@@ -65,6 +73,8 @@ def compose_episode(
     lines: list[str] = []
     if content:
         lines.append(content)
+    if steps:
+        lines.append("过程：" + "；".join(steps[-12:]))
     if handled:
         lines.append("当帧处理：" + "；".join(handled))
     if errors:
@@ -123,6 +133,13 @@ def _describe_silence(
     if len(messages) == 1:
         return f"没回复 {who}", f"看到了 {who} 的消息，这一帧没有回应。"
     return f"没回复 {len(messages)} 条消息", "看到了消息，这一帧没有回应。"
+
+
+def _describe_exploration(steps: Sequence[str]) -> tuple[str, str]:
+    """没有聊天、没有活动、只有一串工具调用：记成一次探索。"""
+    head = "、".join(steps[:3])
+    body = "\n".join(f"- {step}" for step in steps[-12:])
+    return f"探索：{head}", f"这一轮做了 {len(steps)} 步：\n{body}"
 
 
 def _describe_activity_end(activity: Activity) -> tuple[str, str]:

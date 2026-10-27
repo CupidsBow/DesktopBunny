@@ -1,6 +1,7 @@
-"""LLM HTTP 传输：超时、有限重试、退避。
+"""LLM HTTP 传输：超时、有限重试、退避、工具调用。
 
-只负责把 messages 变成文本，不解析 Decision，也不拼 prompt。
+只负责把 messages 变成一条助手消息（文本 + tool_calls），不解析 Decision，
+也不拼 prompt。
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ class LLMClient:
         params.update(overrides)
         return cls(**params)
 
+    # ------------------------------------------------------------------
     def chat(
         self,
         messages: Sequence[Mapping[str, Any]],
@@ -58,38 +60,58 @@ class LLMClient:
         temperature: float | None = None,
         json_mode: bool = False,
     ) -> str:
-        """调用模型并返回文本；失败抛 ``LLMError``。
+        """只要文本。巩固任务这类纯 JSON 输出用它。"""
+        message = self.complete(
+            messages,
+            timeout=timeout,
+            temperature=temperature,
+            json_mode=json_mode,
+        )
+        return _extract_text(message)
 
-        ``json_mode`` 打开 ``response_format={"type": "json_object"}``：模型
-        不再输出 Markdown 围栏或前言，Decision 解析的失败率会明显下降。
+    def complete(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | None = "auto",
+        timeout: float | None = None,
+        temperature: float | None = None,
+        json_mode: bool = False,
+    ) -> dict[str, Any]:
+        """返回助手消息本体（``content`` 与 ``tool_calls`` 都在里面）。
 
-        但不同厂商/模型对这个字段的支持并不一致（有的直接 400）。所以第一次
-        被拒后自动关掉，本次立即重发，之后的所有帧都不再带——不会每帧烧一次
-        失败请求。
+        ``json_mode`` 打开 ``response_format={"type": "json_object"}``；不同模型
+        支持不一致，首次被 400 拒绝后自动关掉并立即重发，之后不再带。
         """
-        payload: dict[str, Any] = {
+        body: dict[str, Any] = {
             "model": self.model,
             "messages": [dict(message) for message in messages],
         }
         if temperature is not None:
-            payload["temperature"] = temperature
-        use_json_mode = bool(json_mode) and self._json_mode_ok
+            body["temperature"] = temperature
+        if tools:
+            body["tools"] = [dict(tool) for tool in tools]
+            if tool_choice:
+                body["tool_choice"] = tool_choice
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         request_timeout = float(timeout or self.timeout)
+        use_json_mode = bool(json_mode) and self._json_mode_ok
 
         last_error: Exception | None = None
         attempt = 0
         while attempt <= self.retry_limit:
-            body = dict(payload)
+            payload = dict(body)
             if use_json_mode:
-                body["response_format"] = {"type": "json_object"}
+                payload["response_format"] = {"type": "json_object"}
             try:
                 response = requests.post(
                     self.chat_url,
-                    json=body,
+                    json=payload,
                     headers=headers,
                     timeout=request_timeout,
                 )
@@ -98,24 +120,26 @@ class LLMClient:
             except requests.RequestException as exc:
                 last_error = LLMError(f"LLM 请求失败：{exc}")
             else:
-                if (
-                    response.status_code == 400
-                    and use_json_mode
-                    and "response_format" in (response.text or "")
-                ):
+                text = response.text or ""
+                if response.status_code == 400 and use_json_mode and "response_format" in text:
                     logger.warning(
                         "该模型不支持 response_format，已关闭 JSON 模式并重发"
                     )
                     self._json_mode_ok = False
                     use_json_mode = False
                     continue
+                if response.status_code == 400 and "tools" in text:
+                    raise LLMError(
+                        "该端点或模型不支持工具调用（tools）。"
+                        f"响应：{text[:300]}"
+                    )
                 try:
                     if response.status_code >= 500 or response.status_code == 429:
                         raise LLMError(
                             f"LLM 服务暂时不可用 (HTTP {response.status_code})"
                         )
                     response.raise_for_status()
-                    return self._extract_text(response.json())
+                    return _message_of(response.json())
                 except (KeyError, IndexError, TypeError, ValueError) as exc:
                     last_error = LLMError(f"LLM 响应格式异常：{exc}")
                 except LLMError as exc:
@@ -135,19 +159,28 @@ class LLMClient:
         assert last_error is not None
         raise last_error
 
-    @staticmethod
-    def _extract_text(data: Mapping[str, Any]) -> str:
-        message = data["choices"][0]["message"]
-        content = message.get("content")
-        if not content:
-            reasoning = message.get("reasoning_content")
-            if reasoning:
-                logger.warning(
-                    "LLM 返回空 content，退回 reasoning_content 兜底（%s 字）；"
-                    "这一段大概率不是可解析的 Decision",
-                    len(str(reasoning)),
-                )
-                content = reasoning
-        if not content:
-            raise LLMError("LLM 返回空内容")
-        return str(content).strip()
+
+def _message_of(data: Mapping[str, Any]) -> dict[str, Any]:
+    message = data["choices"][0]["message"]
+    if not isinstance(message, Mapping):
+        raise TypeError("choices[0].message 不是对象")
+    return dict(message)
+
+
+def _extract_text(message: Mapping[str, Any]) -> str:
+    content = message.get("content")
+    if not content:
+        reasoning = message.get("reasoning_content")
+        if reasoning:
+            logger.warning(
+                "LLM 返回空 content，退回 reasoning_content 兜底（%s 字）；"
+                "这一段大概率不是可解析的 Decision",
+                len(str(reasoning)),
+            )
+            content = reasoning
+    if not content:
+        raise LLMError("LLM 返回空内容")
+    return str(content).strip()
+
+
+__all__ = ["LLMClient"]

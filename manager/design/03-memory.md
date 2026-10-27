@@ -290,6 +290,7 @@ metadata:
 - 情景由**机制**自动写入：每个终态帧结束后，`memory/frame_episode.py` 从这一帧真正发生的事（动作、对方、文本、结束的活动、处理了哪些事件、有没有报错）拼一条 L2。LLM 不再有 `remember` 字段。
 - 情感打分取自当帧派生的 `SelfState`：`valence = mood`、`emotion = mood_label`、`arousal = 最强欲望的 level`。这是机制侧的观察值，不是模型对自己的自评，模型也就没法用一段漂亮的文字替自己加分。
 - 纯发呆（没有事件、没有动作）不写；`idle` 但看到了消息、选择不回，会留一条"没回复 X"。
+- 一整轮只用工具、最后 `idle` 收尾的回合会写一条"探索：fs.list …"，正文带"过程："行列出用过的工具。没有它，翻你的桌面这种事转头就忘。
 - 启动帧（`WakeReasonKind.STARTUP`）不写，否则每次重启都会留一条"开机说了句话"。
 - `speaker` 只在 `chat.*` 帧填；`time` 用帧时间。
 - L3 语义文件（`self` / `goals` / `preferences` / `friends`）只由巩固任务重写，模型不再有直接写入入口。

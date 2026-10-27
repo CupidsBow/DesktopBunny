@@ -76,6 +76,10 @@ capabilities.register(
 
 ## 3. 能力清单
 
+能力在认知帧里以 **function calling 工具**的形式出现（`shared/tools_spec.py`
+把 `web.search` 编译成 `web_search`，因为工具名不允许点号）。调用能力工具
+等于 `action=tool.call`，结果下一帧以事件返回。
+
 | 能力 | 作用 | 异步 |
 | --- | --- | --- |
 | `web.search` | 搜索网页 | 是 |

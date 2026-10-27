@@ -995,6 +995,80 @@ def test_exploration_leaves_episode(tmpdir):
         brain.stop("测试结束")
 
 
+def test_address_and_slug_hygiene(tmpdir):
+    """地址补冒号、坏字符拒绝；情景文件名不带 shell 通配符。"""
+    from manager.executor.chat_sender import ChatSender
+    from manager.memory.store import slugify
+
+    assert ChatSender.normalize("peertestbot") == "peer:testbot", "少冒号应补上"
+    assert ChatSender.normalize("peer:Bob") == "peer:Bob"
+    assert ChatSender.normalize("FD694B94A3E1E850C9A8F0A03F976157").startswith("FD")
+    assert ChatSender.normalize("u_123") == "u_123"
+
+    for bad in ("", "peer:", "有 空格", "id[0]"):
+        try:
+            ChatSender.normalize(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"应当拒绝：{bad!r}")
+
+    assert "[" not in slugify("探索：pc.observe ['window', 'processes']")
+    assert "'" not in slugify("探索：pc.observe ['window', 'processes']")
+
+
+def test_peer_address_in_situation(tmpdir):
+    """情境里的 peers 直接给可用地址，省得模型自己拼。"""
+    from manager.frame_generator.situation import SituationBuilder
+    from manager.shared.types import BodyState, EnvironmentState, Peer, SelfState
+
+    class _Memory:
+        config = type("C", (), {"recall_auto_limit": 0, "recall_auto_max_chars": 0})()
+
+        def view(self, speaker=None):
+            return type(
+                "V",
+                (),
+                {
+                    "self_summary": "",
+                    "goals_summary": "",
+                    "preferences_summary": "",
+                    "about_speaker": "",
+                    "speaker_first_seen": None,
+                    "speaker_last_seen": None,
+                    "index": [],
+                },
+            )()
+
+        def recent_context(self):
+            return ""
+
+        def friends(self, limit=12):
+            return []
+
+        def recall(self, query, limit=None):
+            return []
+
+    builder = SituationBuilder(_Memory())
+    situation = builder.build(
+        environment=EnvironmentState(
+            now=clock_now(), peers=[Peer(name="Bob", slug="Bob")]
+        ),
+        body=BodyState(
+            satiety=80.0, energy=0.8, social_battery=0.6, presence="有人"
+        ),
+        self_state=SelfState(mood=0.0, mood_label="平静"),
+        events=[],
+        wake_reasons=[],
+    )
+    assert situation["environment"]["peers"][0]["friend_id"] == "peer:Bob"
+
+
+def clock_now():
+    from datetime import datetime
+
+    return datetime(2026, 10, 28, 1, 0, 0).astimezone()
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -1050,6 +1124,8 @@ _TESTS = [
     ("启动帧不写情景", test_startup_writes_no_episode),
     ("沉默的 idle 留痕但不记发呆", test_silent_idle_episode),
     ("探索回合留情景", test_exploration_leaves_episode),
+    ("地址与文件名卫生", test_address_and_slug_hygiene),
+    ("情境里的 peer 地址", test_peer_address_in_situation),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),

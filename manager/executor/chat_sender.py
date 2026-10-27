@@ -8,6 +8,7 @@ transport 接口统一为 ``send_message(friend_id, msg_id, text)``；QQ 专属�
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -42,6 +43,13 @@ class ChatSender:
         if not text:
             return DeliveryStatus(ok=False, parts_sent=0, detail="消息内容为空")
 
+        try:
+            friend_id = self.normalize(target.friend_id)
+        except ValueError as exc:
+            logger.warning("地址不合法，拒绝发送：%s", exc)
+            return DeliveryStatus(ok=False, parts_sent=0, detail=str(exc))
+        target = Target(friend_id=friend_id, msg_id=target.msg_id)
+
         msg_id = None if active else target.msg_id
         ok = self._deliver(target, text, msg_id=msg_id)
         if not ok and msg_id:
@@ -53,6 +61,33 @@ class ChatSender:
 
     def reach_out(self, target: Target, text: str) -> DeliveryStatus:
         return self.send(target, text, active=True)
+
+    @staticmethod
+    def normalize(friend_id: str) -> str:
+        """把地址改对；明显坏的地址直接拒绝。
+
+        已知的错法：本地兔子写成 ``peertestbot``（少冒号）。这种地址如果放进
+        QQ 通道，会打到 ``/v2/users/peertestbot/messages`` 换来一个 400，
+        错误还藏在 HTTP 层。所以在发之前就补上冒号。
+
+        QQ openid 是 32 位十六进制；其他形式按原样放行——本地测试与将来的
+        通道都可能用别的地址，只在字符集明显非法（空白、括号、引号）时拒绝。
+
+        Raises:
+            ValueError: 地址为空或含不可能出现在任何地址里的字符。
+        """
+        text = (friend_id or "").strip()
+        if not text:
+            raise ValueError("target 缺少 friend_id")
+        if text.startswith("peer:"):
+            if len(text) <= len("peer:"):
+                raise ValueError("peer: 后面缺少 slug")
+            return text
+        if text.startswith("peer") and len(text) > len("peer"):
+            return "peer:" + text[len("peer") :]
+        if not re.fullmatch(r"[\w:.\-]{1,64}", text):
+            raise ValueError(f"地址含非法字符：{text!r}")
+        return text
 
     # ------------------------------------------------------------------
     def _deliver(

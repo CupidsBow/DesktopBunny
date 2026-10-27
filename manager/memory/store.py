@@ -15,7 +15,9 @@ from manager.shared.types import Episode, FriendProfile, MemoryMetadata
 
 logger = logging.getLogger(__name__)
 
-_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+#: 文件名里不该出现的字符：Windows 保留字符，外加括号与引号——
+#: 它们在 shell 里是通配符，会让文件名没法直接用命令读取。
+_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\[\]\'`\x00-\x1f]')
 
 
 def _parse_scalar(text: str) -> Any:

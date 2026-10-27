@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 _OBJECT = {"type": "object"}
 
+#: pc.observe 的合法观察项；写进 schema，省得模型自己发明 "window"、"system"。
+_OBSERVE_ITEMS = [
+    "foreground",
+    "presence",
+    "processes",
+    "cpu",
+    "memory",
+    "network",
+]
+
 
 class CapabilityRegistry:
     def __init__(
@@ -224,14 +234,19 @@ class CapabilityRegistry:
 
         self.add(
             "pc.observe",
-            "观察前台窗口、键鼠空闲、进程、CPU、内存与网络。",
+            "观察电脑状态。what 只能取 "
+            "foreground（前台窗口）、presence（键鼠空闲）、processes、"
+            "cpu、memory、network；不传默认只做前两项。",
             {
                 **_OBJECT,
                 "properties": {
                     "what": {
                         "oneOf": [
-                            {"type": "string"},
-                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "string", "enum": _OBSERVE_ITEMS},
+                            {
+                                "type": "array",
+                                "items": {"type": "string", "enum": _OBSERVE_ITEMS},
+                            },
                         ]
                     }
                 },

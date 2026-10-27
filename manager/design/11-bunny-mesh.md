@@ -21,6 +21,7 @@
 | 出站通道 | QQ transport（REST） | mesh transport（写收件箱文件） |
 
 - `friend_id` 是**自描述地址**：`peer:` 前缀就是通道选择器。LLM 照抄来信的 `friend_id`，执行层按前缀路由，LLM 无需知道通道细节。
+- 情境里的 `environment.peers` 直接给出 `friend_id: "peer:<slug>"`，省得模型自己拼。真机上出现过拼成 `peertestbot`（少冒号）的情况，于是 `ChatSender.normalize` 会把 `peer<slug>` 补成 `peer:<slug>`；含空格、括号、引号的地址直接拒绝，不放进 QQ 通道换 400。
 - 因为本地消息就是 `MESSAGE`，[brain.py:432](manager/brain.py#L432) 的 `ensure_friend`、[brain.py:770](manager/brain.py#L770) 的 L1 记录、态度/关系/想念派生**全部自动生效**——兔子之间会互相长档案、长态度、触发想念，和 QQ 好友没有两样。
 
 ### 1.1 本地兔子朋友名单（.env + 预建档案）

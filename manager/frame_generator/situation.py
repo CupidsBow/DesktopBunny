@@ -108,7 +108,12 @@ class SituationBuilder:
                 ),
                 "system": environment.system_state,
                 "peers": [
-                    {"name": peer.name, "slug": peer.slug}
+                    {
+                        "name": peer.name,
+                        "slug": peer.slug,
+                        # 直接给出可用地址，省得她自己拼成 peertestbot
+                        "friend_id": f"peer:{peer.slug}",
+                    }
                     for peer in environment.peers
                 ],
             },

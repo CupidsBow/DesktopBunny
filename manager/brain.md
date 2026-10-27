@@ -269,7 +269,7 @@ manager/
 │   ├── logging_setup.py        # 日志配置
 │   ├── timeutil.py             # 时间、ISO、衰减、钳制
 │   ├── jsonutil.py             # JSON 提取与容错
-│   └── llm_client.py           # LLM HTTP 传输（重试/超时）
+│   └── llm_client.py           # LLM HTTP 传输（重试/超时/JSON 模式）
 ├── environment/
 │   ├── environment.py          # EnvironmentState 聚合
 │   ├── presence.py             # 空闲时长与在场
@@ -353,7 +353,7 @@ main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator
 | --- | --- | --- | --- |
 | `shared/types.py` | 所有跨模块数据类与枚举：`Event`、`Decision`、`BodyState`、`EnvironmentState`、`SelfState`、`Activity`、`Capability`、`CapabilityResult`、`MemoryWriteOp`、`MemoryView`、`BunnySnapshot`、`AuditRecord`、`WakeReason`、错误；附带 `to_dict`/`from_dict` | 构造参数 / JSON dict | 类型实例 / JSON dict |
 | `shared/config.py` | 从 constants 组装 `BrainConfig` / `BrainPaths`，提供全部可调参数 | constants / env | `BrainConfig` / `BrainPaths` |
-| `shared/llm_client.py` | LLM HTTP 传输：超时、有限重试、退避 | `messages`、超时 | 文本内容或 `LLMError` |
+| `shared/llm_client.py` | LLM HTTP 传输：超时、有限重试、退避、JSON 模式（模型不支持时自动降级） | `messages`、超时、`json_mode` | 文本内容或 `LLMError` |
 
 **environment / body**
 

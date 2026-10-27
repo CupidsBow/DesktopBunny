@@ -91,8 +91,9 @@ class FakeLLM:
         self.script = list(script)
         self.calls = []
 
-    def chat(self, messages, timeout=None, temperature=None):
+    def chat(self, messages, timeout=None, temperature=None, json_mode=False):
         self.calls.append(list(messages))
+        self.last_json_mode = json_mode
         system = messages[0]["content"] if messages else ""
         if "记忆整理程序" in system:
             return '{"operations": []}'
@@ -760,6 +761,46 @@ def test_memory_capabilities(tmpdir):
         brain.stop("测试结束")
 
 
+def test_llm_client_json_mode(tmpdir):
+    """json_mode 带上 response_format；被 400 拒绝后自动关闭并立刻重发。"""
+    from manager.shared import llm_client as mod
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status, text=""):
+            self.status_code = status
+            self.text = text
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise mod.requests.HTTPError(f"HTTP {self.status_code}")
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"action":"idle"}'}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append(json)
+        if json.get("response_format"):
+            return FakeResponse(400, '{"error":"response_format not supported"}')
+        return FakeResponse(200)
+
+    original = mod.requests.post
+    mod.requests.post = fake_post
+    try:
+        client = mod.LLMClient(api_key="k", chat_url="u", model="m")
+        text = client.chat([{"role": "user", "content": "hi"}], json_mode=True)
+        assert text == '{"action":"idle"}'
+        assert calls[0].get("response_format") == {"type": "json_object"}
+        assert "response_format" not in calls[1], "被拒后应立即重发且不带该字段"
+
+        calls.clear()
+        client.chat([{"role": "user", "content": "hi"}], json_mode=True)
+        assert "response_format" not in calls[0], "关闭后不应再带 response_format"
+    finally:
+        mod.requests.post = original
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -817,6 +858,7 @@ _TESTS = [
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),
+    ("JSON 模式与降级", test_llm_client_json_mode),
 ]
 
 

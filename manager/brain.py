@@ -661,6 +661,9 @@ class Brain:
         now = self.now_fn()
         self._frame_counter += 1
         caller = f"frame_{self._frame_counter}"
+        if self._frame_counter % 20 == 0:
+            # 观察协议稳定性：修复率是决定要不要换原生 tool calling 的依据。
+            logger.info("认知统计：%s", self.thinker.describe_stats())
         total_unhandled = len(unhandled)
         limit = int(self.config.inbox_max_events or 0)
         if limit > 0 and len(unhandled) > limit:

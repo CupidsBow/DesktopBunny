@@ -158,6 +158,7 @@
 | 情况 | 处理 |
 | --- | --- |
 | JSON 解析失败 | 修复提示并重试一次（`max_decision_repair`）；仍失败则本帧无 Decision |
+| 模型不支持 `response_format` | 首次被 400 拒绝时自动关掉 JSON 模式并立即重发；此后不再带 |
 | 未知 action | 视为非法；修复一次；仍失败则本帧无 Decision |
 | 缺少 target | 修复；仍失败则本帧无 Decision |
 | 未知能力 | 返回错误；LLM 下一帧换路 |

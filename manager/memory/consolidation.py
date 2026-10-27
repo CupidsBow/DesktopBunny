@@ -98,6 +98,7 @@ class Consolidator:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.2,
+                    json_mode=True,
                 )
             except Exception as exc:
                 logger.warning("记忆整理调用失败：%s", exc)

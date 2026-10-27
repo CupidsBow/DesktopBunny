@@ -40,8 +40,35 @@ class Thinker:
         self.config = config
         self.llm = llm
         self.parser = parser or DecisionParser(config)
+        #: 认知帧统计，用于观察协议稳定性（尤其是 JSON 模式的效果）。
+        self.stats = {"frames": 0, "repaired": 0, "failed": 0}
 
     def run(
+        self,
+        frame: Frame,
+        *,
+        inbox_ids: Iterable[str] | None = None,
+    ) -> FrameResult:
+        """跑一帧并记账。"""
+        result = self._run(frame, inbox_ids=inbox_ids)
+        self.stats["frames"] += 1
+        if result.repaired:
+            self.stats["repaired"] += 1
+        if result.decision is None:
+            self.stats["failed"] += 1
+        return result
+
+    def describe_stats(self) -> str:
+        frames = self.stats["frames"]
+        if not frames:
+            return "尚无认知帧"
+        rate = self.stats["repaired"] / frames * 100
+        return (
+            f"帧 {frames}｜修复 {self.stats['repaired']}（{rate:.1f}%）"
+            f"｜失败 {self.stats['failed']}"
+        )
+
+    def _run(
         self,
         frame: Frame,
         *,
@@ -51,7 +78,9 @@ class Thinker:
         started = time.monotonic()
         try:
             raw = self.llm.chat(
-                frame.messages, timeout=self.config.frame_timeout_seconds
+                frame.messages,
+                timeout=self.config.frame_timeout_seconds,
+                json_mode=True,
             )
         except LLMError as exc:
             return FrameResult(
@@ -90,7 +119,9 @@ class Thinker:
         )
         try:
             raw2 = self.llm.chat(
-                repair_messages, timeout=self.config.frame_timeout_seconds
+                repair_messages,
+                timeout=self.config.frame_timeout_seconds,
+                json_mode=True,
             )
         except LLMError as exc:
             return FrameResult(

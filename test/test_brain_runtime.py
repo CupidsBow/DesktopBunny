@@ -702,6 +702,64 @@ def test_frame_failure_retries(tmpdir):
         brain.stop("测试结束")
 
 
+def test_related_memories_in_situation(tmpdir):
+    """相关召回由装配层自动完成，不必 LLM 主动调工具。"""
+    clock = Clock()
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            _reply("记得看那篇文章。"),
+            _reply("就是上次说的那篇。"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "那篇文章叫啥")
+        assert wait_until(
+            lambda: any("那篇文章" in m["text"] for m in transport.sent)
+        ), "首轮回复未发出"
+        assert wait_until(
+            lambda: brain.memory.store.list_episodes()
+        ), "情景未落盘"
+
+        QQAdapter(brain).submit_message("u_123", "m_2", "文章名字再发我一下")
+        assert wait_until(lambda: len(llm.calls) >= 3), "第二帧未触发"
+
+        related = _situation(llm.calls[-1]).get("memories", {}).get("related", [])
+        assert related, "情境里没有自动召回的相关记忆"
+        assert any("文章" in str(item.get("summary")) for item in related)
+    finally:
+        brain.stop("测试结束")
+
+
+def test_memory_capabilities(tmpdir):
+    """记忆全部前置：没有 memory.* 能力，语义与召回都由装配层给。"""
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _reply("在的。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        names = brain.registry.names()
+        assert not [name for name in names if name.startswith("memory.")], (
+            f"记忆不该再作为能力暴露：{names}"
+        )
+
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
+        assert wait_until(
+            lambda: any(m["text"] == "在的。" for m in transport.sent)
+        ), "回复未发出"
+        memories = _situation(llm.calls[-1]).get("memories", {})
+        assert "friends" in memories, "情境缺少好友摘要"
+        assert "related" in memories, "情境缺少相关召回"
+    finally:
+        brain.stop("测试结束")
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -757,6 +815,8 @@ _TESTS = [
     ("启动帧不写情景", test_startup_writes_no_episode),
     ("沉默的 idle 留痕但不记发呆", test_silent_idle_episode),
     ("帧失败自动重试", test_frame_failure_retries),
+    ("召回自动注入情境", test_related_memories_in_situation),
+    ("记忆能力只留读档案", test_memory_capabilities),
 ]
 
 

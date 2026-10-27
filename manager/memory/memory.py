@@ -204,6 +204,29 @@ class Memory:
             logger.warning("读取好友档案 %s 失败：%s", friend_id, exc)
             return FriendProfile(friend_id=friend_id)
 
+    def friends(self, *, limit: int = 12) -> list[FriendProfile]:
+        """列出好友档案，按最近互动倒序。
+
+        情境装配用它给认知一份"认识谁"的摘要；没有这个，主动联系某人之前
+        她想不起对方是谁。
+        """
+        try:
+            names = os.listdir(self.paths.friends_dir)
+        except OSError as exc:
+            logger.debug("列出好友档案失败：%s", exc)
+            return []
+        profiles: list[FriendProfile] = []
+        for name in names:
+            if not name.endswith(".md"):
+                continue
+            friend_id = name[: -len(".md")]
+            try:
+                profiles.append(self.store.read_friend(friend_id))
+            except (OSError, ValueError) as exc:
+                logger.debug("读取好友档案 %s 失败：%s", friend_id, exc)
+        profiles.sort(key=lambda item: item.last_seen or "", reverse=True)
+        return profiles[: max(1, limit)]
+
     def first_seen_map(self, friend_ids: Iterable[str]) -> dict[str, str]:
         """批量取好友的 ``first_seen``，供关系计算使用。"""
         result: dict[str, str] = {}
@@ -238,6 +261,7 @@ class Memory:
         return self.recall_service.recall(query, limit)
 
     def read_semantic(self, target: str) -> str:
+        """读语义记忆文件；能力层已不再暴露读取入口，留给内部与诊断使用。"""
         try:
             return self.store.read_text(target)
         except (OSError, ValueError) as exc:
@@ -398,26 +422,6 @@ class Memory:
                 content=(content or description).strip(),
                 metadata=metadata,
                 description=description.strip(),
-            )
-        )
-
-    def write_semantic(
-        self,
-        target: str,
-        content: str,
-        *,
-        valence: float = 0.0,
-        arousal: float = 0.0,
-        emotion: str = "平静",
-    ) -> str:
-        return self.worker.submit(
-            MemoryWriteOp(
-                op=MemoryWriteType.UPDATE_SEMANTIC,
-                target=target,
-                content=content,
-                metadata=MemoryMetadata(
-                    valence=valence, arousal=arousal, emotion=emotion
-                ),
             )
         )
 

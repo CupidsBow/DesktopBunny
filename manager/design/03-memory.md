@@ -23,10 +23,10 @@
 | L1 超限压缩与归档 | `manager/memory/compression.py` |
 | L2/L3 文件读写 | `manager/memory/store.py` |
 | `MEMORY.md` 索引 | `manager/memory/index.py` |
-| `memory.recall` | `manager/memory/recall.py` |
+| 关键词召回 | `manager/memory/recall.py` |
+| 终态帧自动情景 | `manager/memory/frame_episode.py` |
 | 巩固任务 | `manager/memory/consolidation.py` |
 | 串行写入 | `manager/memory/worker.py` |
-| 能力适配 | `manager/capabilities/memory_api.py` |
 
 ---
 
@@ -145,9 +145,9 @@ memory/                         # Alice 的大脑
 3. 常驻的 `self.md`、`goals.md`、`preferences.md`。
 4. 索引行里带上 `valence`/`arousal`，供 LLM 判断哪些值得展开。
 
-**相关性由 LLM 判断，机制不挑。** 情境只呈现索引；LLM 觉得哪条相关，就用 `memory.recall(query)` 展开具体内容。不做向量检索、不做全文索引。
+**相关召回由装配层自动做。** 情境装配时，用本帧消息文本与当前活动目标当查询，调关键词召回，把 top N 作为 `memories.related` 一并给出（受 `recall_auto_limit` 与 `recall_auto_max_chars` 约束）。召回不再是能力，LLM 不需要"想起来去查"。不做向量检索、不做全文索引。
 
-LLM 可以主动调用 `memory.recall(query)` 获取更多；机制不替它判断"够不够"。
+好友摘要（`memories.friends`）也随情境给出，按最近互动排序，最多 12 人。所以没有 `memory.read` / `memory.recall` 这类能力——该进 prompt 的东西不该藏在 tools 里。
 
 ### 4.3 情绪权重参考
 
@@ -292,7 +292,7 @@ metadata:
 - 纯发呆（没有事件、没有动作）不写；`idle` 但看到了消息、选择不回，会留一条"没回复 X"。
 - 启动帧（`WakeReasonKind.STARTUP`）不写，否则每次重启都会留一条"开机说了句话"。
 - `speaker` 只在 `chat.*` 帧填；`time` 用帧时间。
-- LLM 通过 `memory.write` 能力更新 L3 语义文件。
+- L3 语义文件（`self` / `goals` / `preferences` / `friends`）只由巩固任务重写，模型不再有直接写入入口。
 - 自动巩固在后台提交 L3 与索引的写操作。
 - 所有写入统一进 memory worker 队列，串行落盘；机制只负责落盘、去重、索引维护，不判断内容价值。
 
@@ -350,7 +350,9 @@ metadata:
 | `l1_summary_max_chars` | 滚动摘要的字数上限 |
 | `l1_compress_retry_seconds` | 压缩调用失败后的重试间隔 |
 | `l1_hard_max_lines` | 压缩持续失败时 L1 的硬行数上限 |
-| `recall_max_episodes` | `memory.recall` 单次返回上限 |
+| `recall_max_episodes` | 召回单次返回上限 |
+| `recall_auto_limit` | 每帧自动召回注入情境的条数 |
+| `recall_auto_max_chars` | 自动召回的摘要总字符预算 |
 | `self_max_bytes` / `goals_max_bytes` / `preferences_max_bytes` | 常驻文件体积上限 |
 | `episode_max_bytes` | 单条情景上限 |
 | `consolidation_interval` | 自动巩固周期 |

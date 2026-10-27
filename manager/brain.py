@@ -25,7 +25,6 @@ from manager.body.self_state import SelfStateDeriver
 from manager.capabilities.artifacts import ArtifactStore
 from manager.capabilities.audit import AuditLog
 from manager.capabilities.executor import CapabilityExecutor
-from manager.capabilities.memory_api import MemoryApi
 from manager.capabilities.registry import CapabilityRegistry
 from manager.environment.environment import Environment
 from manager.event_queue.event_queue import EventQueue
@@ -288,11 +287,9 @@ class Brain:
         # --- 能力 ---
         self.artifacts = ArtifactStore(self.paths.artifacts_dir)
         self.audit = AuditLog(self.paths.audit_path)
-        self.memory_api = MemoryApi(self.memory)
         self.registry = CapabilityRegistry(
             config,
             artifacts=self.artifacts,
-            memory=self.memory_api,
             eat_handler=eat_handler,
             now_fn=now_fn,
         )

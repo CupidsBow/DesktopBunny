@@ -23,6 +23,9 @@ from manager.shared.types import (
 
 logger = logging.getLogger(__name__)
 
+#: 情境里带几个好友摘要。
+_FRIENDS_LIMIT = 12
+
 
 class SituationBuilder:
     def __init__(
@@ -57,6 +60,7 @@ class SituationBuilder:
         view = self.memory.view(speaker)
 
         primary = active_activity or paused_activity
+        related = self._related(unhandled, primary)
         situation: dict[str, Any] = {
             "now": to_iso(now),
             "wake_reasons": [
@@ -119,6 +123,8 @@ class SituationBuilder:
                 "speaker_first_seen": view.speaker_first_seen,
                 "speaker_last_seen": view.speaker_last_seen,
                 "index": [render_line(entry) for entry in view.index],
+                "friends": self._friend_lines(),
+                "related": related,
                 "recent_context": self.memory.recent_context(),
             },
             "delivery": _delivery(delivery),
@@ -126,6 +132,82 @@ class SituationBuilder:
         if notes:
             situation["notes"] = [str(note) for note in notes]
         return situation
+
+    # ------------------------------------------------------------------
+    def _friend_lines(self) -> list[dict[str, Any]]:
+        """认识谁：按最近互动排序的好友摘要，供主动联系前回忆对方。"""
+        try:
+            profiles = self.memory.friends(limit=_FRIENDS_LIMIT)
+        except Exception as exc:
+            logger.debug("读取好友摘要失败：%s", exc)
+            return []
+        lines: list[dict[str, Any]] = []
+        for profile in profiles:
+            if not profile.friend_id:
+                continue
+            impression = " ".join(
+                (profile.impression or profile.shared_history or "").split()
+            )
+            lines.append(
+                {
+                    "friend_id": profile.friend_id,
+                    "impression": impression[:80],
+                    "last_seen": profile.last_seen,
+                }
+            )
+        return lines
+
+    def _related(
+        self, events: list[Event], activity: Activity | None
+    ) -> list[dict[str, Any]]:
+        """每帧自动召回：拿本帧的消息和活动目标当查询，把候选记忆放进情境。
+
+        这原本是 ``memory.recall`` 能力，靠 LLM 自己想起来才调；现在改成装配层
+        每次都做，配额度上限控制上下文。召不到就返回空列表。
+        """
+        texts = [
+            str(event.payload.get("text") or "")
+            for event in events
+            if event.kind is EventKind.MESSAGE
+        ]
+        if activity is not None:
+            texts.append(activity.goal or "")
+        query = " ".join(part.strip() for part in texts if part and part.strip())
+        if not query:
+            return []
+
+        config = self.memory.config
+        try:
+            candidates = self.memory.recall(
+                query, limit=int(config.recall_auto_limit)
+            )
+        except Exception as exc:  # 召回失败不该拖垮整帧
+            logger.debug("自动召回失败：%s", exc)
+            return []
+
+        budget = max(0, int(config.recall_auto_max_chars))
+        related: list[dict[str, Any]] = []
+        used = 0
+        for item in candidates:
+            summary = str(item.get("summary") or "").strip()
+            if not summary:
+                continue
+            remaining = budget - used
+            if remaining <= 0:
+                break
+            if len(summary) > remaining:
+                if remaining < 40:
+                    break
+                summary = summary[:remaining].rstrip() + "…"
+            used += len(summary)
+            related.append(
+                {
+                    "ref": item.get("ref"),
+                    "summary": summary,
+                    "valence": item.get("valence"),
+                }
+            )
+        return related
 
 
 # ----------------------------------------------------------------------

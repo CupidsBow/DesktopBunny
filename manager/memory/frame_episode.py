@@ -87,17 +87,17 @@ def _describe(
     if action is Action.CHAT_REPLY:
         who = speaker or "对方"
         text = _clip(str(args.get("text") or ""), _TEXT_LIMIT)
-        return f"回复 {who}", f"回复 {who}：{text}"
+        return f"回复 {who}：{_clip(text, 40)}", f"回复 {who}：{text}"
 
     if action is Action.CHAT_REACH_OUT:
         who = speaker or "朋友"
         text = _clip(str(args.get("text") or ""), _TEXT_LIMIT)
-        return f"主动联系 {who}", f"主动联系 {who}：{text}"
+        return f"主动联系 {who}：{_clip(text, 40)}", f"主动联系 {who}：{text}"
 
     if action is Action.ACTIVITY_START:
         kind = str(args.get("kind") or "未命名")
         goal = _clip(str(args.get("goal") or ""), _TEXT_LIMIT)
-        return f"开始 {kind} 活动", f"开始 {kind} 活动。\n目标：{goal}"
+        return f"开始 {kind}：{_clip(goal, 40)}", f"开始 {kind} 活动。\n目标：{goal}"
 
     if action in _ACTION_TEXT:
         short, full = _ACTION_TEXT[action]
@@ -136,7 +136,7 @@ def _describe_activity_end(activity: Activity) -> tuple[str, str]:
     lines = [f"{activity.kind} 活动{status}。", f"目标：{goal}"]
     if result:
         lines.append(f"结果：{result}")
-    return f"{activity.kind} 活动{status}", "\n".join(lines)
+    return f"{activity.kind} 活动{status}：{_clip(goal, 40)}", "\n".join(lines)
 
 
 def _handled_lines(events: Sequence[Event]) -> list[str]:

@@ -166,8 +166,8 @@ activity.start
 | --- | --- | --- |
 | `explore.web` | 搜索、阅读、顺着兴趣深入 | `web.search`, `web.fetch` |
 | `explore.pc` | 了解本地文件、项目、软件、目录结构 | `fs.list`, `fs.read`, `fs.search`, `pc.observe` |
-| `learn` | 围绕主题阅读、整理、做笔记 | `web.*`, `fs.*`, `artifact.read`, `memory.write` |
-| `reflect` | 回顾经历、整理记忆、写日记 | `memory.recall`, `memory.read`, `memory.write`, `artifact.read` |
+| `learn` | 围绕主题阅读、整理、做笔记 | `web.*`, `fs.*`, `artifact.read` |
+| `reflect` | 回顾经历、整理记忆、写日记 | `artifact.read`, `fs.write`（召回与语义记忆已在情境里） |
 | `create` | 写文字、做小工具、画点东西 | `fs.write`, `sandbox.run` |
 
 活动类型不是封闭枚举；新增类型只需要新的 kind 与能力组合。

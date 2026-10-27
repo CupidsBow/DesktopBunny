@@ -34,7 +34,6 @@ Decision (tool.call)
 | 异步、超时、结果截断 | `manager/capabilities/executor.py` |
 | 审计 | `manager/capabilities/audit.py` |
 | artifact 存取 | `manager/capabilities/artifacts.py` |
-| 记忆能力适配 | `manager/capabilities/memory_api.py` |
 | 工具注册表 | `tools/tool_executor.py` |
 | 工具纯函数 | `tools/web_tools.py` / `fs_tools.py` / `sandbox_tools.py` / `pc_tools.py` / `get_local_time.py` |
 
@@ -88,12 +87,11 @@ capabilities.register(
 | `artifact.read` | 读取大结果的 artifact 引用 | 否 |
 | `sandbox.run` | 运行代码与命令 | 是 |
 | `pc.observe` | 进程、前台应用、资源占用 | 否 |
-| `memory.recall` | 召回相关记忆 | 否 |
-| `memory.read` | 读取语义记忆文件 | 否 |
-| `memory.write` | 更新语义记忆 | 否 |
 | `time.now` | 当前时间 | 否 |
 | `eat` | 让桌宠吃东西（需注入 `eat_handler`） | 否 |
 
+> 记忆不再是能力。语义记忆与好友摘要随情境给出，情景由终态帧自动写入，相关召回由装配层每帧自动做——该进 prompt 的东西不放在 tools 里。
+>
 > `chat.send` 不作为 LLM 能力暴露：它由 [10-executor](10-executor.md) 根据 `chat.reply` / `chat.reach_out` 调用。
 
 ### 3.1 参数示例
@@ -102,7 +100,6 @@ capabilities.register(
 {"capability": "web.search", "args": {"query": "小模型 综述", "limit": 5}}
 {"capability": "fs.read", "args": {"path": "C:/Users/.../project/README.md"}}
 {"capability": "pc.observe", "args": {"what": ["foreground", "cpu"]}}
-{"capability": "memory.recall", "args": {"query": "上次推荐的文章"}}
 {"capability": "artifact.read", "args": {"ref": "artifact://web/7", "offset": 0, "limit": 4000}}
 ```
 
@@ -222,7 +219,7 @@ capabilities.register(
 
 1. 在 `tools/` 写纯函数，输入输出可序列化（例如 `tools/web_tools.py`）。
 2. 在 `manager/capabilities/registry.py` 注册：名称、描述、schema、是否异步、超时。
-3. 如涉及记忆，加到 `manager/capabilities/memory_api.py`，不要在 `tools/` 里导入记忆模块。
+3. 记忆不提供能力：需要记忆时改装配层（`frame_generator/situation.py`），不要在 `tools/` 里导入记忆模块。
 4. 补测试：正常路径、超时、参数非法、大结果。
 5. 若涉及新的系统资源，补审计字段。
 
@@ -232,7 +229,7 @@ capabilities.register(
 
 ## 9. 能力与记忆
 
-- 能力结果默认不写记忆；要长期保留时用 `memory.write` 更新 L3 语义文件。情景由机制在终态帧自动写入，不依赖能力的返回值。
+- 能力结果默认不写记忆；情景由机制在终态帧自动写入，语义记忆由巩固任务重写，都不依赖能力的返回值。
 - 大结果以 artifact 引用保存，避免上下文膨胀。
 - 活动结束时可把 artifact 摘要沉淀进 L2。
 

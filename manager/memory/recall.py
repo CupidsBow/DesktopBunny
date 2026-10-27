@@ -1,6 +1,7 @@
-"""``memory.recall``：按关键词扫描索引与记忆正文，返回摘要与引用。
+"""关键词召回：按词元扫描索引与记忆正文，返回摘要与引用。
 
-不做向量检索，也不替 LLM 判断相关性；只给候选，由 LLM 决定展开什么。
+由情境装配每帧自动调用（见 ``frame_generator/situation.py``），不再是能力。
+不做向量检索，也不替 LLM 判断相关性；只给候选项。
 """
 
 from __future__ import annotations

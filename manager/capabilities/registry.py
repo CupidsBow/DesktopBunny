@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from manager.capabilities.artifacts import ArtifactStore
-from manager.capabilities.memory_api import MemoryApi
 from manager.shared.config import BrainConfig
 from manager.shared.timeutil import now_local
 from manager.shared.types import Capability
@@ -29,13 +28,11 @@ class CapabilityRegistry:
         config: BrainConfig,
         *,
         artifacts: ArtifactStore | None = None,
-        memory: MemoryApi | None = None,
         eat_handler: Callable[[str], bool] | None = None,
         now_fn: Callable[[], datetime] = now_local,
     ) -> None:
         self.config = config
         self.artifacts = artifacts
-        self.memory = memory
         self.eat_handler = eat_handler
         self.now_fn = now_fn
         self._capabilities: dict[str, Capability] = {}
@@ -242,47 +239,6 @@ class CapabilityRegistry:
             observe,
             timeout_seconds=15,
         )
-
-        if self.memory is not None:
-            self.add(
-                "memory.recall",
-                "按关键词召回相关记忆候选。",
-                {
-                    **_OBJECT,
-                    "properties": {
-                        "query": {"type": "string"},
-                        "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-                    },
-                    "required": ["query"],
-                },
-                self.memory.recall,
-                timeout_seconds=5,
-            )
-            self.add(
-                "memory.read",
-                "读取 self/goals/preferences/friends 语义记忆。",
-                {
-                    **_OBJECT,
-                    "properties": {"target": {"type": "string"}},
-                    "required": ["target"],
-                },
-                self.memory.read,
-                timeout_seconds=5,
-            )
-            self.add(
-                "memory.write",
-                "覆盖写入语义记忆文件；会长期保留。",
-                {
-                    **_OBJECT,
-                    "properties": {
-                        "target": {"type": "string"},
-                        "content": {"type": "string"},
-                    },
-                    "required": ["target", "content"],
-                },
-                self.memory.write,
-                timeout_seconds=5,
-            )
 
         if self.eat_handler is not None:
             self.add(

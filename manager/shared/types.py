@@ -221,7 +221,7 @@ ACTIVITY_KINDS: dict[str, tuple[str, ...]] = {
     "explore.web": ("web.search", "web.fetch"),
     "explore.pc": ("fs.list", "fs.read", "fs.search", "pc.observe"),
     "learn": ("web.search", "web.fetch", "fs.read", "fs.write", "artifact.read"),
-    "reflect": ("memory.recall", "memory.read", "memory.write", "artifact.read"),
+    "reflect": ("artifact.read", "fs.write"),
     "create": ("fs.write", "sandbox.run", "artifact.read"),
 }
 

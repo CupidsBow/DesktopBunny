@@ -36,7 +36,7 @@
 一个需要查资料再回复的回合可能是：
 
 ```
-帧1  tool.call(memory.recall)
+帧1  tool.call(web.search)
 帧2  tool.call(web.fetch)
 帧3  chat.reply
 ```
@@ -117,7 +117,7 @@
 {
   "action": "tool.call",
   "calls": [
-    {"capability": "memory.recall", "args": {"query": "上次推荐的文章"}},
+    {"capability": "web.search", "args": {"query": "那篇文章 作者"}},
     {"capability": "web.fetch", "args": {"url": "https://..."}}
   ],
   "next_wake_in": 0
@@ -180,9 +180,7 @@
 
 ```
 帧1  情境：u_123 问"上次那篇文章还有吗"
-     Decision: tool.call(memory.recall("推荐的文章"))
-
-帧2  情境：召回到"2026-10-18 推荐过《小模型综述》"
+     情境里已自动带上相关情景："2026-10-18 推荐过《小模型综述》"
      Decision: chat.reply("有呀，是《小模型综述》，要我发链接吗？")
      handled: [ev_91, ev_92]
      next_wake_in: 30

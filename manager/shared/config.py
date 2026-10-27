@@ -210,6 +210,9 @@ class BrainConfig:
     memory_index_max_lines: int = 200
     memory_index_max_bytes: int = 25 * 1024
     recall_max_episodes: int = 12
+    #: 每帧自动召回：取几条、摘要总预算多少字符。召回由装配层做，不再作为能力。
+    recall_auto_limit: int = 8
+    recall_auto_max_chars: int = 1200
     episode_max_bytes: int = 2048
     self_max_bytes: int = 4096
     goals_max_bytes: int = 4096

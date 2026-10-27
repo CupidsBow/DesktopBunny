@@ -4,12 +4,10 @@ from manager.capabilities.registry import CapabilityRegistry
 from manager.capabilities.executor import CapabilityExecutor
 from manager.capabilities.artifacts import ArtifactStore
 from manager.capabilities.audit import AuditLog
-from manager.capabilities.memory_api import MemoryApi
 
 __all__ = [
     "CapabilityRegistry",
     "CapabilityExecutor",
     "ArtifactStore",
     "AuditLog",
-    "MemoryApi",
 ]

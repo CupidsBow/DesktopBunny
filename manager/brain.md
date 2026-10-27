@@ -75,7 +75,7 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 | 探索电脑 | `activity.start(explore.pc)` + `fs.*` / `pc.observe` | activity + capabilities |
 | 学习 / 整理 | `activity.start(learn)` + `web.*` / `memory.*` | activity + capabilities |
 | 创作 | `activity.start(create)` + `fs.write` / `sandbox.run` | activity + capabilities |
-| 思考 / 内省 | `activity.start(reflect)` + `memory.recall` | activity + memory |
+| 思考 / 内省 | `activity.start(reflect)` + `artifact.read` | activity + memory |
 | 吃点东西 | `tool.call(eat)` | capability → 桌宠主线程 |
 | 什么都不做 | `idle`（`next_wake_in` / `wake_when` 可选） | executor（无输出） |
 
@@ -181,15 +181,13 @@ Alice 不是"会聊天的机器人"，而是一个**持续存在**的个体：
 21:03  frame_generator 装帧：三条消息 + 对 u_123 的态度 + 精力/社交电量。
        此时 Alice 正在 explore.web 的第 3 步。
 
-21:04  LLM 看到：活动进度 40% + 三条新消息（标注 arrived_during）。
-       决定先回复；用 memory.recall 找回上次推荐的文章。
-
-21:04  tool.call → memory.recall，结果作为 capability_done 事件返回，触发下一帧。
+21:04  LLM 看到：活动进度 40% + 三条新消息（标注 arrived_during）
+       + 情境里已经自动召回的那次推荐文章。
 
 21:04  LLM 决定 chat.reply，内容包含文章名；handled 标记三条消息全部处理。
 
 21:05  executor 发出回复（一条消息，不拆分）。
-       Alice 记一条情景："u_123 又来问那篇文章"，valence +0.4。
+       终态帧结束，机制自动写一条情景："回复 u_123：那篇文章是……"。
 
 21:05  LLM 决定 activity.resume。
        下一帧继续探索。
@@ -283,7 +281,7 @@ manager/
 │   ├── memory.py               # 记忆门面与 L1
 │   ├── store.py                # L2/L3 文件读写
 │   ├── index.py                # MEMORY.md 索引
-│   ├── recall.py               # memory.recall
+│   ├── recall.py               # 关键词召回（装配层每帧调用）
 │   ├── compression.py          # L1 超限压缩并归档到 L2
 │   ├── consolidation.py        # 巩固任务（只产出写操作）
 │   └── worker.py               # 记忆写入串行队列
@@ -292,7 +290,6 @@ manager/
 │   ├── executor.py             # 参数校验、异步、超时、结果截断
 │   ├── audit.py                # 审计日志
 │   ├── artifacts.py            # artifact 存取
-│   └── memory_api.py           # memory.* 能力适配
 ├── activity/
 │   ├── activity.py             # ActivityService 生命周期与检查点
 │   └── store.py                # activities.json
@@ -336,7 +333,7 @@ main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator
 2. `frame_generator` / `thinker` 只读：不写记忆、不改活动、不标事件；只返回 Decision。
 3. `executor` 只写输出：不改写 Decision，不重新判断。
 4. `brain` 只决定"何时跑一帧"，不决定"跑完做什么"。
-5. `tools/` 的纯函数不导入 `manager/`；需要记忆的能力由 `capabilities/memory_api.py` 适配。
+5. `tools/` 的纯函数不导入 `manager/`；记忆不提供能力，全部由装配层与巩固任务前置处理。
 6. 禁止循环依赖：`memory/consolidation.py` 只依赖 `shared/llm_client.py`、`memory/store.py` 与 `memory/worker.py`。
 
 ### 6.3 文件职责与输入输出
@@ -382,7 +379,7 @@ main ──▶ brain ──▶ event_queue / lifecycle ──▶ frame_generator
 | `capabilities/executor.py` | 参数校验、同步/异步派发、超时、结果截断 | `CapabilityCall` | `CapabilityResult` |
 | `capabilities/audit.py` | 追加式审计日志 | 调用元数据 | JSONL 行 |
 | `capabilities/artifacts.py` | 大结果的存取与引用解析 | 文本/字节、`artifact://` ref | ref / 分片 |
-| `capabilities/memory_api.py` | 把 `memory.recall/read/write` 适配为能力 handler | 能力 args | 结构化结果 / 写操作 |
+| `capabilities/audit.py` | 追加式审计日志 | 调用元数据 | JSONL 行 |
 
 **activity / lifecycle / event_queue**
 
@@ -493,7 +490,7 @@ _run_frame:
 **E. 记忆写入与巩固**
 
 ```text
-机制自动情景（终态帧）/ memory.write / consolidation
+机制自动情景（终态帧）/ consolidation（L3 语义）
   → memory worker.enqueue(op)
        ├─ store.write(...)          # L2/L3
        ├─ index.update(...)         # MEMORY.md
@@ -533,7 +530,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
 | 队列 | 生产者 | 消费者 | 语义 |
 | --- | --- | --- | --- |
 | 事件账本 `event_queue` | QQ adapter、能力执行器、活动、闹钟、信号 | 情境装配 | 只追加；`unhandled/handled` |
-| 记忆写队列 | executor、memory_api、L1 压缩、巩固 worker | 记忆 worker | 串行、有序 |
+| 记忆写队列 | 终态帧情景、L1 压缩、巩固 worker | 记忆 worker | 串行、有序 |
 | 唤醒信号 `_pending_reasons` | adapter、闹钟、信号、时钟 | 认知 worker | 合并后的唤醒 |
 
 状态所有权：

@@ -148,7 +148,7 @@ class BrainConfig:
 
     # --- 机制：时钟、唤醒、帧 ---
     state_tick_interval: float = 2.0
-    #: 本地兔子心跳写入间隔（秒）。
+    #: 本地朋友心跳写入间隔（秒）。
     peer_heartbeat_seconds: float = 5.0
     #: 心跳超过这么久（秒）判为离线。
     peer_heartbeat_timeout: float = 15.0

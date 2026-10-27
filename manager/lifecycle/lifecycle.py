@@ -204,7 +204,7 @@ class Lifecycle:
         self._pending_interactions += max(0, int(count))
 
     # ------------------------------------------------------------------
-    # 本地兔子网格（2 秒状态时钟顺带推进）
+    # 本地朋友网格（2 秒状态时钟顺带推进）
     # ------------------------------------------------------------------
     def _drive_mesh(self) -> None:
         if self.mesh is None:
@@ -219,7 +219,7 @@ class Lifecycle:
             logger.exception("mesh 收件箱轮询失败")
 
     def take_messages(self) -> list:
-        """取走本时钟拍内收到的本地兔子消息，交给 brain 转成 MESSAGE 事件。"""
+        """取走本时钟拍内收到的本地朋友消息，交给 brain 转成 MESSAGE 事件。"""
         messages, self._mesh_messages = self._mesh_messages, []
         return messages
 

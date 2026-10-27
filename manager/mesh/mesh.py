@@ -1,6 +1,6 @@
-"""本地兔子网格：文件会合点上的 presence 心跳与 inbox 私聊。
+"""本地朋友网格：文件会合点上的 presence 心跳与 inbox 私聊。
 
-- 每只兔子往 ``presence/<slug>.json`` 周期性写心跳 → 存在感知。
+- 每个在线朋友往 ``presence/<slug>.json`` 周期性写心跳 → 存在感知。
 - 出站往对方 ``inbox/<slug>/`` 写消息文件 → 点对点投递。
 - 入站轮询自己的 ``inbox/<slug>/`` → 由 brain 转成 MESSAGE 事件。
 
@@ -29,7 +29,7 @@ _MAX_RECENT_IDS = 1024
 
 
 class MeshService:
-    """本地兔子通道：既是 presence 发布者，也是 ``peer:`` 前缀的 transport。"""
+    """本地朋友通道：既是 presence 发布者，也是 ``peer:`` 前缀的 transport。"""
 
     def __init__(
         self,
@@ -82,7 +82,7 @@ class MeshService:
         )
 
     def discover(self) -> list[Peer]:
-        """列出在线的本地兔子（不含自己）。心跳新鲜度是唯一权威判据。"""
+        """列出在线的本地朋友（不含自己）。心跳新鲜度是唯一权威判据。"""
         now = self._now_fn()
         peers: list[Peer] = []
         try:
@@ -130,7 +130,7 @@ class MeshService:
             )
             return True
         except OSError:
-            logger.exception("写给本地兔子 %s 失败", slug)
+            logger.exception("写给本地朋友 %s 失败", slug)
             return False
 
     # ------------------------------------------------------------------

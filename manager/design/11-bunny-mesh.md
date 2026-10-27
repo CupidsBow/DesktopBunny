@@ -1,7 +1,8 @@
-# 11 · 兔兔之间：本地兔子也是「朋友」
+# 11 · 朋友之间：本地通道也是「朋友」
 
-> 多只兔兔（不同 `BUNNY_NAME` 的多个进程）住在同一台 Windows 电脑里。
-> 本模块把「本地兔子」接入现有的消息模型：QQ 好友和本地兔子都是同一种**朋友**，
+> 同一台 Windows 电脑上可能有多个进程（不同 `BUNNY_NAME` 的多个 Bunny），
+> 也可能有别的实现了这套文件协议的本地程序。
+> 本模块把「本地朋友」接入现有的消息模型：QQ 好友和本地朋友都是同一种**朋友**，
 > 它们之间的消息一律以 `MESSAGE` 事件进 [07-event_queue](07-event_queue.md)，回复也一律走 `chat.reply` / `chat.reach_out`，
 > 由执行层按对方是谁路由到正确的通道。
 >
@@ -11,9 +12,9 @@
 
 ## 1. 统一消息模型
 
-这是本设计的核心：**不新增事件类型、不新增出站动作**，把「本地兔子」当成一个以地址区分的普通朋友。
+这是本设计的核心：**不新增事件类型、不新增出站动作**，把「本地朋友」当成一个以地址区分的普通朋友。
 
-| 概念 | QQ 好友 | 本地兔子 |
+| 概念 | QQ 好友 | 本地朋友 |
 | --- | --- | --- |
 | `friend_id`（地址） | QQ openid（如 `u_123`） | `peer:<slug>`（如 `peer:Alice`） |
 | 来信事件 | `EventKind.MESSAGE` | `EventKind.MESSAGE`（同一个） |
@@ -24,11 +25,11 @@
 - 情境里的 `environment.peers` 直接给出 `friend_id: "peer:<slug>"`，省得模型自己拼。真机上出现过拼成 `peertestbot`（少冒号）的情况，于是 `ChatSender.normalize` 会把 `peer<slug>` 补成 `peer:<slug>`；含空格、括号、引号的地址直接拒绝，不放进 QQ 通道换 400。
 - 因为本地消息就是 `MESSAGE`，[brain.py:432](manager/brain.py#L432) 的 `ensure_friend`、[brain.py:770](manager/brain.py#L770) 的 L1 记录、态度/关系/想念派生**全部自动生效**——兔子之间会互相长档案、长态度、触发想念，和 QQ 好友没有两样。
 
-### 1.1 本地兔子朋友名单（.env + 预建档案）
+### 1.1 本地朋友朋友名单（.env + 预建档案）
 
 LLM 不需要在 prompt 里学 `peer:` 前缀——朋友名单来自配置，地址写进朋友档案：
 
-- `.env` 用 `BUNNY_FRIENDS` 列出本地兔子朋友的名字（逗号分隔，如 `BUNNY_FRIENDS=Bob,Carol`）。
+- `.env` 用 `BUNNY_FRIENDS` 列出本地朋友朋友的名字（逗号分隔，如 `BUNNY_FRIENDS=Bob,Carol`）。
 - 首次启动时，对每个名字构造 `friend_id = peer:<名字>`；若记忆里还没有这份朋友档案，就建一份**空档案**（frontmatter 的 `name` 就是 `friend_id`，含 `first_seen`/`last_seen`）。
 - 之后真的收到某只兔子的消息时，`ensure_friend` 再照常刷新 `last_seen`；没上线的兔子也一直有档案，LLM 从记忆里就能认出"这是老朋友，不是陌生人"。
 
@@ -148,7 +149,7 @@ LLM 由此知道"此刻还有谁在"；想主动找谁，就用 `chat.reach_out`
 ```python
 Event(
     kind=EventKind.MESSAGE,
-    source=EventSource(friend_id=f"peer:{from_slug}"),   # 本地兔子以 peer: 前缀寻址
+    source=EventSource(friend_id=f"peer:{from_slug}"),   # 本地朋友以 peer: 前缀寻址
     payload={"msg_id": ..., "text": ..., "from_name": ...},
 )
 ```
@@ -165,10 +166,10 @@ Event(
 
 ### 5.2 出站：`chat.reply` / `chat.reach_out` 路由
 
-不新增 `bunny.message` 能力。LLM 对本地兔子和 QQ 好友用**同一套** `chat.reply` / `chat.reach_out`，区别只在 `target.friend_id`：
+不新增 `bunny.message` 能力。LLM 对本地朋友和 QQ 好友用**同一套** `chat.reply` / `chat.reach_out`，区别只在 `target.friend_id`：
 
 - QQ 好友：`target.friend_id = "u_123"` → QQ transport。
-- 本地兔子：`target.friend_id = "peer:Alice"` → mesh transport。
+- 本地朋友：`target.friend_id = "peer:Alice"` → mesh transport。
 
 实现点是 [chat_sender.py](manager/executor/chat_sender.py) 的 `_call_transport`，从"单一 transport"改成"按 friend_id 前缀选 transport"：
 
@@ -193,7 +194,7 @@ def transport_for(friend_id: str) -> Transport:
 | `manager/environment/environment.py` | 通过 `peers_getter` 取在线列表，写进 `EnvironmentState.peers`（沿用 `snapshot_getter` 注入模式） |
 | `manager/lifecycle/lifecycle.py` | 状态时钟 tick 里顺带 `mesh.heartbeat()` 与 `mesh.poll_inbox()`（2 秒一次） |
 | `manager/executor/chat_sender.py` | `transport_for(friend_id)` 路由；`msg_type` 下沉进 QQ transport |
-| `manager/frame_generator/situation.py` | 情境 `environment` 加 `peers`；`MESSAGE` 事件对 `peer:` 前缀显示为本地兔子 |
+| `manager/frame_generator/situation.py` | 情境 `environment` 加 `peers`；`MESSAGE` 事件对 `peer:` 前缀显示为本地朋友 |
 | `constants/constants.py` + `.env` | 新增 `BUNNY_FRIENDS`（逗号分隔的兔子朋友名字），解析成 slug 列表 |
 | `manager/brain.py` | 启动时按 `BUNNY_FRIENDS` 预建 `peer:<名字>` 的空朋友档案（仅首次，已有则跳过） |
 | `main.py` | 装配 `MeshService`，交给 `Brain`；`Brain` 分发给 environment / lifecycle / chat_sender；把 `peer:<slug>` 列表传给 `Brain` |

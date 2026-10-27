@@ -379,7 +379,7 @@ class Brain:
         logger.info("Brain 已启动：%s", self.paths.root)
 
     def _preload_bunny_friends(self) -> None:
-        """按 .env 的 BUNNY_FRIENDS 预建本地兔子朋友档案（仅首次，已有则跳过）。
+        """按 .env 的 BUNNY_FRIENDS 预建本地朋友档案（仅首次，已有则跳过）。
 
         friend_id 用 `peer:<名字>` 与来信一致；档案里 frontmatter 的 `name` 就是
         这个 friend_id，LLM 从记忆里就能认出"这是老朋友"，无需 prompt 额外教前缀。
@@ -389,7 +389,7 @@ class Brain:
                 if not self.memory.friend(friend_id).first_seen:
                     self.memory.ensure_friend(friend_id)
             except Exception:
-                logger.exception("预建兔子朋友档案失败：%s", friend_id)
+                logger.exception("预建朋友档案失败：%s", friend_id)
 
     def stop(self, reason: str = "正常关闭") -> None:
         if not self._started:
@@ -484,7 +484,7 @@ class Brain:
         return event
 
     def _ingest_peer_message(self, message) -> None:
-        """本地兔子的 inbox 消息 → MESSAGE 事件（friend_id 用 ``peer:<slug>``）。"""
+        """本地朋友的 inbox 消息 → MESSAGE 事件（friend_id 用 ``peer:<slug>``）。"""
         try:
             self.submit_event(
                 Event(
@@ -501,11 +501,11 @@ class Brain:
             )
         except Exception:
             logger.exception(
-                "本地兔子消息入队失败：%s", getattr(message, "msg_id", "")
+                "本地朋友消息入队失败：%s", getattr(message, "msg_id", "")
             )
 
     def _baseline_peers(self) -> None:
-        """启动时记住当前在线兔子，避免把"启动时对方已在"当成新上线。"""
+        """启动时记住当前在线的朋友，避免把"启动时对方已在"当成新上线。"""
         if self.mesh is None:
             self._known_peer_slugs = set()
             return
@@ -516,7 +516,7 @@ class Brain:
             self._known_peer_slugs = set()
 
     def _detect_peer_presence(self) -> None:
-        """本地兔子从离线变在线时，发 SIGNAL 事件唤醒 LLM（有机会主动打招呼）。"""
+        """本地朋友从离线变在线时，发 SIGNAL 事件唤醒 LLM（有机会主动打招呼）。"""
         if self.mesh is None:
             return
         current = {peer.slug for peer in self.lifecycle.environment_state.peers}
@@ -525,7 +525,7 @@ class Brain:
         self._known_peer_slugs = current
 
     def _peer_online(self, slug: str) -> None:
-        logger.info("本地兔子上线：%s", slug)
+        logger.info("本地朋友上线：%s", slug)
         self._add_event(
             EventKind.SIGNAL,
             {
@@ -533,11 +533,11 @@ class Brain:
                 "from": "offline",
                 "to": "online",
                 "slug": slug,
-                "detail": f"本地兔子 {slug} 上线了",
+                "detail": f"朋友 {slug} 上线了",
             },
         )
         self._notify(
-            WakeReason(kind=WakeReasonKind.EVENT, detail=f"本地兔子 {slug} 上线")
+            WakeReason(kind=WakeReasonKind.EVENT, detail=f"朋友 {slug} 上线")
         )
 
     def snapshot(self) -> dict[str, Any]:

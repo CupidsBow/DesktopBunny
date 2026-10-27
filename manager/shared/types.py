@@ -503,7 +503,7 @@ class BunnySnapshot(DataModel):
 
 @dataclass
 class Peer(DataModel):
-    """在线的本地兔子（presence 心跳里的一条）。"""
+    """在线的本地朋友（presence 心跳里的一条）。"""
 
     name: str
     slug: str

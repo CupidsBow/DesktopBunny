@@ -1,6 +1,6 @@
 """聊天发送：按 friend_id 路由通道，被动/主动降级、有限重试与投递状态。
 
-通道差异只在这一层的路由：``peer:`` 前缀走本地兔子网格，其余走 QQ。
+通道差异只在这一层的路由：``peer:`` 前缀走本地朋友网格，其余走 QQ。
 transport 接口统一为 ``send_message(friend_id, msg_id, text)``；QQ 专属的
 ``msg_type``（markdown 判断）下沉进 QQ transport，这里不再关心。
 """
@@ -66,7 +66,7 @@ class ChatSender:
     def normalize(friend_id: str) -> str:
         """把地址改对；明显坏的地址直接拒绝。
 
-        已知的错法：本地兔子写成 ``peertestbot``（少冒号）。这种地址如果放进
+        已知的错法：本地朋友写成 ``peertestbot``（少冒号）。这种地址如果放进
         QQ 通道，会打到 ``/v2/users/peertestbot/messages`` 换来一个 400，
         错误还藏在 HTTP 层。所以在发之前就补上冒号。
 

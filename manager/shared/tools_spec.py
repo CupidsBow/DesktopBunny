@@ -52,39 +52,26 @@ _ACTION_TOOLS: dict[str, dict[str, Any]] = {
         },
         "required": ["kind", "goal"],
     },
-    "activity_pause": {
-        "action": "activity.pause",
-        "description": "暂停当前活动，可选带恢复条件。",
+    "activity": {
+        "action": None,
+        "description": (
+            "操作当前活动。op=pause 暂停、resume 继续、complete 完成、abandon 放弃。"
+        ),
         "properties": {
+            "op": {
+                "type": "string",
+                "enum": ["pause", "resume", "complete", "abandon"],
+            },
             "note": {"type": "string"},
             "resume_when": {
                 "type": "array",
                 "items": {"type": "object"},
-                "description": '条件列表，如 [{"type":"satiety_above","args":{"value":60}}]',
+                "description": '暂停时的恢复条件，如 [{"type":"satiety_above","args":{"value":60}}]',
             },
-        },
-        "required": [],
-    },
-    "activity_resume": {
-        "action": "activity.resume",
-        "description": "继续当前活动。",
-        "properties": {},
-        "required": [],
-    },
-    "activity_complete": {
-        "action": "activity.complete",
-        "description": "结束当前活动并标记完成。",
-        "properties": {"summary": {"type": "string"}},
-        "required": [],
-    },
-    "activity_abandon": {
-        "action": "activity.abandon",
-        "description": "结束当前活动并放弃。",
-        "properties": {
-            "outcome": {"type": "string", "enum": ["completed", "abandoned"]},
             "summary": {"type": "string"},
+            "outcome": {"type": "string", "enum": ["completed", "abandoned"]},
         },
-        "required": ["outcome"],
+        "required": ["op"],
     },
     "idle": {
         "action": "idle",
@@ -92,6 +79,14 @@ _ACTION_TOOLS: dict[str, dict[str, Any]] = {
         "properties": {},
         "required": [],
     },
+}
+
+#: 合并后的 ``activity`` 工具：op → 实际动作。
+_ACTIVITY_OPS: dict[str, str] = {
+    "pause": "activity.pause",
+    "resume": "activity.resume",
+    "complete": "activity.complete",
+    "abandon": "activity.abandon",
 }
 
 #: 所有动作工具共用的公共参数。
@@ -167,7 +162,11 @@ def build_tools(capabilities: Iterable[Mapping[str, Any]]) -> ToolSpec:
 
     for tool_name, definition in _ACTION_TOOLS.items():
         spec.tools.append(_action_tool(tool_name, definition))
-        spec.kinds[tool_name] = ("action", definition["action"])
+        action = definition.get("action")
+        #: ``activity`` 这类合并工具没有固定动作，留到解析时按 op 决定。
+        spec.kinds[tool_name] = (
+            ("activity", tool_name) if action is None else ("action", action)
+        )
     return spec
 
 
@@ -205,7 +204,7 @@ def decision_mapping(
         parsed.append((kind, target, dict(arguments)))
 
     capabilities = [item for item in parsed if item[0] == "capability"]
-    actions = [item for item in parsed if item[0] == "action"]
+    actions = [item for item in parsed if item[0] in ("action", "activity")]
 
     if actions and capabilities:
         raise ValueError("动作工具与能力工具不能在同一帧混用")
@@ -236,7 +235,16 @@ def decision_mapping(
             "activity_update": activity_update,
         }
 
-    _, action_value, arguments = actions[0]
+    action_kind, action_value, arguments = actions[0]
+    if action_kind == "activity":
+        op = str(arguments.get("op") or "").strip()
+        action_value = _ACTIVITY_OPS.get(op)
+        if action_value is None:
+            raise ValueError(
+                "activity 的 op 只能是 pause / resume / complete / abandon"
+            )
+        arguments = {key: value for key, value in arguments.items() if key != "op"}
+
     args = _strip_meta(
         arguments,
         (

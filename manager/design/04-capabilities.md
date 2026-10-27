@@ -80,6 +80,11 @@ capabilities.register(
 把 `web.search` 编译成 `web_search`，因为工具名不允许点号）。调用能力工具
 等于 `action=tool.call`，结果下一帧以事件返回。
 
+工具表一共 16 个：11 个能力 + 5 个动作（`chat_reply`、`chat_reach_out`、
+`activity_start`、`activity`、`idle`）。`activity` 用 `op` 区分
+pause / resume / complete / abandon，四个动作共用一份参数 schema——
+它们本来就只在细节上不同，摊开成四个工具白占两千字符。
+
 | 能力 | 作用 | 异步 |
 | --- | --- | --- |
 | `web.search` | 搜索网页 | 是 |

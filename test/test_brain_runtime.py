@@ -138,10 +138,10 @@ _ACTION_TO_TOOL = {
     "chat.reply": "chat_reply",
     "chat.reach_out": "chat_reach_out",
     "activity.start": "activity_start",
-    "activity.pause": "activity_pause",
-    "activity.resume": "activity_resume",
-    "activity.complete": "activity_complete",
-    "activity.abandon": "activity_abandon",
+    "activity.pause": "activity",
+    "activity.resume": "activity",
+    "activity.complete": "activity",
+    "activity.abandon": "activity",
     "idle": "idle",
 }
 
@@ -185,7 +185,10 @@ def _tool_calls(decision):
     if target.get("friend_id"):
         args["friend_id"] = target["friend_id"]
     args.update(_meta(decision))
-    return [_call(_ACTION_TO_TOOL[action], args, 1)]
+    tool_name = _ACTION_TO_TOOL[action]
+    if tool_name == "activity":
+        args["op"] = action.split(".", 1)[1]
+    return [_call(tool_name, args, 1)]
 
 
 class FakeTransport:
@@ -904,6 +907,21 @@ def test_tool_mapping(tmpdir):
     assert "web_search" in names, "点号应换下划线"
     assert "web.search" not in names, "工具名不能带点"
     assert "chat_reply" in names and "idle" in names, "动作工具缺失"
+    assert "activity" in names and "activity_pause" not in names, "活动工具应合并"
+
+    mapping = decision_mapping(
+        [
+            {
+                "function": {
+                    "name": "activity",
+                    "arguments": '{"op": "pause", "note": "先歇会儿"}',
+                }
+            }
+        ],
+        spec,
+    )
+    assert mapping["action"] == "activity.pause", "op 应翻译成具体动作"
+    assert "op" not in mapping["args"], "op 不该混进动作参数"
 
     search = next(t for t in spec.tools if t["function"]["name"] == "web_search")
     assert search["function"]["parameters"]["required"] == ["query"], "required 丢了"
@@ -945,6 +963,9 @@ def test_tool_mapping(tmpdir):
         [  # 动作与能力混用
             {"function": {"name": "idle", "arguments": "{}"}},
             {"function": {"name": "eat", "arguments": "{}"}},
+        ],
+        [  # activity 的 op 非法
+            {"function": {"name": "activity", "arguments": '{"op": "stop"}'}}
         ],
     ):
         try:

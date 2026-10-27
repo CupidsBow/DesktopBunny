@@ -472,19 +472,19 @@ _run_frame:
   → (executor 内部) lifecycle.schedule(next_wake_in, wake_when)
 ```
 
-- 帧失败（网络/限流/超时/解析失败）：事件保持 `unhandled`，不写记忆，错误写进下一帧情境。
+- 帧失败（网络/限流/超时/解析失败）：事件保持 `unhandled`，不写记忆，错误写进下一帧情境；同时按 `5s / 15s / 60s / 180s` 退避排一次重试唤醒（用尽后退回定期心跳，避免持续故障时烧钱）。
 - `next_wake_in` / `wake_when` 只在**终态动作**后生效；`tool.call` 帧由能力结果触发下一帧。
 
 **D. Decision 执行顺序**
 
 ```text
 1. 校验 Decision
-2. remember        → memory worker（create_episode）
-3. chat.reply / chat.reach_out → ChatSender → QQ
-4. tool.call       → CapabilityExecutor
-5. activity.* / activity_update → ActivityService
-6. handled         → EventQueue
-7. next_wake_in / wake_when     → Lifecycle.schedule
+2. chat.reply / chat.reach_out → ChatSender → QQ
+3. tool.call       → CapabilityExecutor
+4. activity.* / activity_update → ActivityService
+5. handled         → EventQueue
+6. next_wake_in / wake_when     → Lifecycle.schedule
+7. 终态帧结束后：机制自动写一条 L2 情景（frame_episode）
 ```
 
 - 发送失败不回滚记忆；`executor.last_delivery` 会进入下一帧情境的 `delivery` 字段。
@@ -493,7 +493,7 @@ _run_frame:
 **E. 记忆写入与巩固**
 
 ```text
-remember / memory.write / consolidation
+机制自动情景（终态帧）/ memory.write / consolidation
   → memory worker.enqueue(op)
        ├─ store.write(...)          # L2/L3
        ├─ index.update(...)         # MEMORY.md
@@ -593,13 +593,7 @@ event_queue / lifecycle / activity / body 各自原子写盘
   "activity_update": null,
   "handled": ["ev_000123"],
   "next_wake_in": 30,
-  "wake_when": [],
-  "remember": {
-    "text": "值得记下的一句话",
-    "valence": 0.4,
-    "emotion": "开心",
-    "arousal": 0.3
-  }
+  "wake_when": []
 }
 ```
 
@@ -622,13 +616,15 @@ event_queue / lifecycle / activity / body 各自原子写盘
 - `next_wake_in` / `wake_when` 只在**终态动作**后生效；`tool.call` 帧不排闹钟，下一帧由 `capability_done/failed` 触发。
 - `idle` 的 `next_wake_in` / `wake_when` 可选：填了表示主动预约下一次醒来；都不填则只靠事件与定期心跳唤醒。
 - `activity.pause` 的 `args.resume_when` 可选：满足时只产生 `alarm` 事件并唤醒，不自动恢复。
-- `remember` 在任意帧都可以提交；写入的是这一帧发生的经历。
+- 决策里没有记忆字段：情景由机制在终态帧结束后自动写入，见 7.3。
 - `activity_update` 只对活动帧有意义；没有当前活动时忽略。
 
 ### 7.3 状态与记忆写入
 
 - **状态**：身体量由身体模块更新；情绪/态度/欲望是派生值，不落盘。
-- **记忆**：LLM 通过 `remember` 或 `memory.*` 能力决定写什么；所有写入经 memory worker 串行落盘与更新索引。
+- **情景**：终态帧结束后，`memory/frame_episode.py` 从"这一帧真正发生的事"拼一条 L2：回复了谁、说了什么、结束了什么活动、处理了哪些事件。情绪打分取自当帧派生的 `SelfState`（`mood` / `mood_label` / 最强欲望的 `level`），不由模型自报。纯发呆（没有事件、没有动作）不写；启动帧也不写（否则每次重启都留一条"开机说了句话"）。
+- **语义**：`memory.*` 能力可以改 `self.md` / `goals.md` / `preferences.md` / 好友档案，但不能直接写 `episodes/`。
+- 所有写入经 memory worker 串行落盘与更新索引。
 - **活动**：由活动模块持久化；LLM 通过 `activity.*` 动作改变其状态。
 
 持久化文件：

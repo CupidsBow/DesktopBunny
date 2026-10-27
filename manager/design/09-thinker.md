@@ -56,13 +56,7 @@
   "activity_update": null,
   "handled": ["ev_91"],
   "next_wake_in": 30,
-  "wake_when": [],
-  "remember": {
-    "text": "u_123 又来问那篇文章",
-    "valence": 0.4,
-    "emotion": "开心",
-    "arousal": 0.3
-  }
+  "wake_when": []
 }
 ```
 
@@ -76,7 +70,6 @@
 | `handled` | 已处理的事件 id |
 | `next_wake_in` | 回合结束后的相对时间闹钟；0 表示立即继续；只在终态动作生效 |
 | `wake_when` | 条件闹钟；谓词白名单 |
-| `remember` | 写入 L2 的对象 `{text, valence, emotion, arousal}`；省略或 `null` 表示不写 |
 
 ---
 
@@ -171,7 +164,7 @@
 | 参数不合法 | 返回校验错误；LLM 修正 |
 | `handled` 含不存在的事件 | 忽略该项，不报错 |
 | `next_wake_in` 越界 | 机制钳制到 0 ~ 24 小时 |
-| LLM 调用失败（网络/限流/5xx/认证） | 有限重试 + 退避；仍失败则本帧无 Decision，事件保持 `unhandled`，不写记忆，靠定期心跳兜底，错误写进下一帧情境 |
+| LLM 调用失败（网络/限流/5xx/认证） | 有限重试 + 退避；仍失败则本帧无 Decision，事件保持 `unhandled`，不写记忆，错误写进下一帧情境；brain 按 `5s / 15s / 60s / 180s` 排重试唤醒，用尽后退回定期心跳 |
 
 帧无 Decision 时不执行任何动作、不写记忆，事件保持 `unhandled` 并在下一帧继续出现。
 
@@ -202,8 +195,7 @@ Decision:
 {
   "action": "activity.start",
   "args": {"kind": "explore.web", "goal": "了解小模型的最新进展", "steps_limit": 8},
-  "next_wake_in": 0,
-  "remember": {"text": "我对小模型产生了兴趣", "valence": 0.3, "emotion": "好奇", "arousal": 0.4}
+  "next_wake_in": 0
 }
 ```
 

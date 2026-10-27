@@ -232,7 +232,7 @@ capabilities.register(
 
 ## 9. 能力与记忆
 
-- 能力结果默认不写记忆；LLM 通过 `remember` 或 `memory.write` 决定保留什么。
+- 能力结果默认不写记忆；要长期保留时用 `memory.write` 更新 L3 语义文件。情景由机制在终态帧自动写入，不依赖能力的返回值。
 - 大结果以 artifact 引用保存，避免上下文膨胀。
 - 活动结束时可把 artifact 摘要沉淀进 L2。
 

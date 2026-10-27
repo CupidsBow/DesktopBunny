@@ -34,6 +34,7 @@ from manager.executor.executor import Executor
 from manager.frame_generator.frame_generator import FrameGenerator
 from manager.lifecycle.lifecycle import Lifecycle
 from manager.memory.consolidation import Consolidator
+from manager.memory.frame_episode import compose_episode
 from manager.memory.memory import Memory
 from manager.shared.config import BrainConfig, BrainPaths
 from manager.shared.llm_client import LLMClient
@@ -64,6 +65,9 @@ logger = logging.getLogger(__name__)
 
 #: 认知 worker 在没有外部唤醒时的轮询间隔（秒）。
 _POLL_INTERVAL = 0.5
+
+#: 帧失败后的重试延迟（秒）。用尽后不再重试，退回定期心跳兜底。
+_FRAME_RETRY_DELAYS = (5, 15, 60, 180)
 
 
 class _ResumeWatcher:
@@ -237,6 +241,8 @@ class Brain:
         self._wake_event = threading.Event()
         self._pending_reasons: list[WakeReason] = []
         self._frame_counter = 0
+        self._frame_failures = 0
+        self._retry_at: datetime | None = None
         self._turn = TurnState()
         self._last_body_save = now_fn()
         self._episodes_cache: list = []
@@ -303,7 +309,6 @@ class Brain:
         self.chat_sender = ChatSender(config, transport, mesh=self.mesh)
         self.executor = Executor(
             config,
-            memory=self.memory,
             activities=self.activities,
             chat_sender=self.chat_sender,
             lifecycle=self.lifecycle,
@@ -639,6 +644,9 @@ class Brain:
                     break
 
                 reasons = self.lifecycle.due() + self._take_pending_reasons()
+                retry = self._take_retry_reason(self.now_fn())
+                if retry is not None:
+                    reasons.append(retry)
                 if not reasons:
                     continue
                 unhandled = self.events.unhandled()
@@ -716,9 +724,11 @@ class Brain:
                 if result is not None and result.raw
                 else "",
             )
+            self._schedule_frame_retry(now)
             return
 
         decision = result.decision
+        self._clear_frame_retry()
         logger.info(
             "帧 %s 决策：%s (%.0f ms%s)",
             caller,
@@ -772,7 +782,17 @@ class Brain:
 
         if decision.is_terminal:
             self._turn = TurnState()
-            self._record_activity_end(decision, effect.activity)
+            self._record_frame_episode(
+                decision,
+                effect,
+                self_state,
+                unhandled,
+                speaker,
+                now,
+                startup=any(
+                    reason.kind is WakeReasonKind.STARTUP for reason in reasons
+                ),
+            )
         else:
             turn.pending_tool_results = list(effect.capability_results)
             self._turn = turn
@@ -917,35 +937,55 @@ class Brain:
             except Exception as exc:
                 logger.debug("写入 L1 失败：%s", exc)
 
-    def _record_activity_end(
-        self, decision, activity: Activity | None
+    def _record_frame_episode(
+        self,
+        decision,
+        effect,
+        self_state,
+        events,
+        speaker: str | None,
+        now: datetime,
+        *,
+        startup: bool = False,
     ) -> None:
-        if activity is None:
+        """终态帧结束后由机制写一条 L2 情景。
+
+        事实由 :func:`compose_episode` 从这一帧的决策与事件里拼；
+        情绪取当帧派生出的 ``SelfState``，不由模型自报。
+
+        启动帧不写：每次重启都留一条"开机说了句话"，只会污染记忆。
+        """
+        if startup:
             return
-        if activity.status not in (
-            ActivityStatus.COMPLETED,
-            ActivityStatus.ABANDONED,
-            ActivityStatus.FAILED,
-        ):
+        composed = compose_episode(
+            decision,
+            speaker=speaker,
+            events=events,
+            activity=effect.activity,
+            errors=effect.errors,
+        )
+        if composed is None:
             return
-        if decision.remember is not None:
-            return
+        description, content = composed
+        urges = getattr(self_state, "urges", None) or []
+        arousal = max((float(getattr(urge, "level", 0.0)) for urge in urges), default=0.0)
         try:
-            summary = (
-                decision.args.get("summary")
-                or decision.args.get("note")
-                or activity.last_result
-                or activity.goal
-            )
             self.memory.remember_episode(
-                f"活动{activity.status.value}：{activity.goal}",
-                f"活动 {activity.kind}（{activity.id}）{activity.status.value}。\n"
-                f"目标：{activity.goal}\n结果：{summary}",
-                valence=-0.2 if activity.status is ActivityStatus.FAILED else 0.1,
-                emotion="平静",
+                description,
+                content,
+                speaker=(
+                    speaker
+                    if decision.action
+                    in (Action.CHAT_REPLY, Action.CHAT_REACH_OUT)
+                    else None
+                ),
+                valence=float(getattr(self_state, "mood", 0.0)),
+                emotion=str(getattr(self_state, "mood_label", "平静") or "平静"),
+                arousal=arousal,
+                at=now,
             )
         except Exception as exc:
-            logger.debug("活动结束记忆写入失败：%s", exc)
+            logger.debug("情景写入失败：%s", exc)
 
     # ------------------------------------------------------------------
     def _episodes(self, now: datetime) -> list:
@@ -983,6 +1023,41 @@ class Brain:
         with self._lock:
             reasons, self._pending_reasons = self._pending_reasons, []
         return reasons
+
+    # ------------------------------------------------------------------
+    def _schedule_frame_retry(self, now: datetime) -> None:
+        """帧失败后安排一次重试唤醒。
+
+        失败时唤醒理由已被消耗：不补一次，消息就得等满 1800 秒的定期心跳。
+        指数退避，用尽 ``_FRAME_RETRY_DELAYS`` 后放弃，交回心跳兜底，
+        避免持续故障时变成烧钱循环。
+        """
+        attempt = self._frame_failures
+        self._frame_failures += 1
+        if attempt >= len(_FRAME_RETRY_DELAYS):
+            self._retry_at = None
+            logger.warning(
+                "帧连续失败 %s 次，暂停重试，等待下次事件或定期心跳",
+                self._frame_failures,
+            )
+            return
+        delay = _FRAME_RETRY_DELAYS[attempt]
+        self._retry_at = now + timedelta(seconds=delay)
+        logger.info("帧失败，%s 秒后重试（第 %s 次）", delay, attempt + 1)
+
+    def _clear_frame_retry(self) -> None:
+        self._frame_failures = 0
+        self._retry_at = None
+
+    def _take_retry_reason(self, now: datetime) -> WakeReason | None:
+        with self._lock:
+            if self._retry_at is None or now < self._retry_at:
+                return None
+            self._retry_at = None
+        return WakeReason(
+            kind=WakeReasonKind.ALARM,
+            detail="帧失败重试",
+        )
 
     @property
     def started(self) -> bool:
@@ -1076,8 +1151,6 @@ def _describe_decision(decision) -> str:
         )
     if decision.handled:
         parts.append(f"handled=[{','.join(decision.handled)}]")
-    if decision.remember is not None:
-        parts.append(f"remember={_summarize(decision.remember.to_dict(), 200)}")
     if decision.next_wake_in is not None:
         parts.append(f"next_wake_in={decision.next_wake_in}")
     if decision.wake_when:

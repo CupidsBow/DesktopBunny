@@ -24,7 +24,6 @@ from manager.shared.types import (
     MemoryView,
     MemoryWriteOp,
     MemoryWriteType,
-    Remember,
 )
 
 logger = logging.getLogger(__name__)
@@ -373,29 +372,6 @@ class Memory:
             return
         del self._recent_turns[:excess]
         logger.warning("L1 压缩持续失败，丢弃最早的 %s 行对话", excess)
-
-    def remember(
-        self,
-        remember: Remember,
-        *,
-        speaker: str | None = None,
-        at: datetime | None = None,
-    ) -> str:
-        at = at or self.now_fn()
-        metadata = MemoryMetadata(
-            speaker=speaker,
-            time=to_iso(at),
-            valence=max(-1.0, min(1.0, float(remember.valence))),
-            emotion=remember.emotion or "平静",
-            arousal=max(0.0, min(1.0, float(remember.arousal))),
-        )
-        op = MemoryWriteOp(
-            op=MemoryWriteType.CREATE_EPISODE,
-            target="",
-            content=remember.text.strip(),
-            metadata=metadata,
-        )
-        return self.worker.submit(op)
 
     def remember_episode(
         self,

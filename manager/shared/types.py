@@ -370,23 +370,6 @@ class ActivityUpdate(DataModel):
 
 
 @dataclass
-class Remember(DataModel):
-    text: str
-    valence: float = 0.0
-    emotion: str = "平静"
-    arousal: float = 0.0
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Remember:
-        return cls(
-            text=str(data.get("text", "")),
-            valence=float(data.get("valence", 0.0)),
-            emotion=str(data.get("emotion", "平静")),
-            arousal=float(data.get("arousal", 0.0)),
-        )
-
-
-@dataclass
 class AlarmPredicate(DataModel):
     type: WakePredicateType
     args: JSON = field(default_factory=dict)
@@ -439,7 +422,6 @@ class Decision(DataModel):
     handled: list[str] = field(default_factory=list)
     next_wake_in: int | None = None
     wake_when: list[AlarmPredicate] = field(default_factory=list)
-    remember: Remember | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -466,7 +448,6 @@ class Decision(DataModel):
 
         target_data = data.get("target")
         update_data = data.get("activity_update")
-        remember_data = data.get("remember")
         next_wake_in = data.get("next_wake_in")
 
         args = dict(data.get("args") or {})
@@ -500,7 +481,6 @@ class Decision(DataModel):
             handled=[str(item) for item in (data.get("handled") or [])],
             next_wake_in=int(next_wake_in) if next_wake_in is not None else None,
             wake_when=wake_when,
-            remember=Remember.from_dict(remember_data) if remember_data else None,
         )
 
 
@@ -1154,7 +1134,6 @@ __all__ = [
     "Target",
     "CapabilityCall",
     "ActivityUpdate",
-    "Remember",
     "AlarmPredicate",
     "Decision",
     "BunnySnapshot",

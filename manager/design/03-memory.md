@@ -83,7 +83,7 @@ u123 问想学编程，Alice 推荐了 Python，并约好下次一起看教程�
 - `speaker` 是**说话人**，也是会话归属（私聊中即 `user_openid`）。
 - `valence` 是情感痕迹，写入后不修改；`emotion`/`arousal` 用于表达与显著性。
 - 文件名格式：`YYYY-MM-DD-<speaker>-<slug>.md`；slug 由概述截取，冲突时追加 `-2`。
-- `name` 与文件名一致，写入后不变；`remember` 不判断内容是否重复，重复事件由巩固合并。
+- `name` 与文件名一致，写入后不变；自动情景不判断内容是否重复，重复事件由巩固合并。
 
 ### 2.4 L3 语义记忆
 
@@ -287,8 +287,11 @@ metadata:
 
 ### 8.1 谁来写
 
-- LLM 通过 Decision 的 `remember` 字段写一条简短情景：`text` 是概述，`valence`/`emotion`/`arousal` 是情感打分。
-- `speaker` 由机制按本帧 `handled` 的消息所属说话人填充；纯活动帧填 `speaker: null`；`time` 用帧时间。
+- 情景由**机制**自动写入：每个终态帧结束后，`memory/frame_episode.py` 从这一帧真正发生的事（动作、对方、文本、结束的活动、处理了哪些事件、有没有报错）拼一条 L2。LLM 不再有 `remember` 字段。
+- 情感打分取自当帧派生的 `SelfState`：`valence = mood`、`emotion = mood_label`、`arousal = 最强欲望的 level`。这是机制侧的观察值，不是模型对自己的自评，模型也就没法用一段漂亮的文字替自己加分。
+- 纯发呆（没有事件、没有动作）不写；`idle` 但看到了消息、选择不回，会留一条"没回复 X"。
+- 启动帧（`WakeReasonKind.STARTUP`）不写，否则每次重启都会留一条"开机说了句话"。
+- `speaker` 只在 `chat.*` 帧填；`time` 用帧时间。
 - LLM 通过 `memory.write` 能力更新 L3 语义文件。
 - 自动巩固在后台提交 L3 与索引的写操作。
 - 所有写入统一进 memory worker 队列，串行落盘；机制只负责落盘、去重、索引维护，不判断内容价值。

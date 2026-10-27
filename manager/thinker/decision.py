@@ -36,7 +36,7 @@ class DecisionParser:
         try:
             decision = Decision.from_dict(data)
         except (AttributeError, TypeError, ValueError) as exc:
-            # 嵌套字段类型不对（如 remember/calls/target 是字符串）会在这里炸，
+            # 嵌套字段类型不对（如 calls/target 是字符串）会在这里炸，
             # 必须转成 DecisionError 才能走 repair 重试，而不是直接帧失败。
             raise DecisionError(f"Decision 字段类型不合法：{exc}") from exc
         self._validate(decision)

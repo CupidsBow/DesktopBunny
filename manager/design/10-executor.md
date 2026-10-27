@@ -58,7 +58,7 @@
 
 ## 3. 记忆写回
 
-- Decision 的 `remember` 字段（`text` + `valence`/`emotion`/`arousal`）→ 提交一条 L2 情景给 memory worker；`speaker`/`time` 由机制填充。
+- 执行层不再提交情景：Decision 里没有记忆字段。L2 情景由 `memory/frame_episode.py` 在终态帧结束后生成，见 [03-memory](03-memory.md) §8。
 - `tool.call(memory.write)` → 提交 L3 语义文件更新。
 - 所有记忆写入统一进 memory worker 队列，串行落盘。
 - 执行层只提交写操作，不决定内容与去重策略。

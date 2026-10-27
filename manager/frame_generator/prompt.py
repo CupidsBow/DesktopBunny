@@ -76,8 +76,7 @@ def build_messages(
   "activity_update": {{"progress": 0.4, "last_result": "...", "note": "..."}},
   "handled": ["ev_000123"],
   "next_wake_in": 30,
-  "wake_when": [],
-  "remember": {{"text": "...", "valence": 0.4, "emotion": "开心", "arousal": 0.3}}
+  "wake_when": []
 }}
 ```
 
@@ -85,7 +84,6 @@ def build_messages(
 - `next_wake_in`：单位秒；会被限制到 0 ~ 24 小时。
 - `wake_when`：唤醒条件列表，元素形如 `{{"type": "...", "args": {{...}}}}`；`type` 可用 `satiety_below`(value)、`energy_below`(value)、`presence_changed`、`at_time`(time)、`activity_checkpoint`。
 - `handled`：填你已经处理完的事件 id；没填的会继续出现在下一帧。
-- `remember`：只记这一帧真正发生的事；不写没有依据的内容。
 
 动作说明：
 - `tool.call`：调用 `calls` 里的能力，本帧不是终点；结果下一帧返回。

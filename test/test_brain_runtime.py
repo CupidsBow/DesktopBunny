@@ -601,6 +601,146 @@ def test_persistence_reload(tmpdir):
         brain2.stop("测试结束")
 
 
+def test_auto_episode(tmpdir):
+    """终态帧自动落一条 L2 情景；决策里不再有 remember 字段。"""
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _reply("记得看那篇文章。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "那篇文章叫啥")
+        assert wait_until(
+            lambda: any(m["text"] == "记得看那篇文章。" for m in transport.sent)
+        ), "回复未发出"
+
+        def replied_episode():
+            return any(
+                "记得看那篇文章" in episode.body
+                for episode in brain.memory.store.list_episodes()
+            )
+
+        assert wait_until(replied_episode), "终态帧没有自动写入情景"
+
+        # 情绪取自当帧派生状态，不由模型自报
+        episode = next(
+            episode
+            for episode in brain.memory.store.list_episodes()
+            if "记得看那篇文章" in episode.body
+        )
+        assert episode.metadata.speaker == "u_123", "情景未记住对话对象"
+        assert episode.metadata.emotion, "情景缺少情绪标签"
+
+        # 输出协议里不该再出现 remember
+        prompts = " ".join(
+            message["content"] for message in llm.calls[-1]
+        )
+        assert "remember" not in prompts, "prompt 里仍残留 remember 字段"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_startup_writes_no_episode(tmpdir):
+    """启动帧不写情景；之后的正常帧照写。"""
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _reply("在的。")])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        time.sleep(0.3)
+        assert (
+            brain.memory.store.list_episodes() == []
+        ), "启动帧不应写入情景"
+
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
+        assert wait_until(
+            lambda: any(m["text"] == "在的。" for m in transport.sent)
+        ), "回复未发出"
+        assert wait_until(
+            lambda: brain.memory.store.list_episodes()
+        ), "正常帧未写入情景"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_frame_failure_retries(tmpdir):
+    """帧失败后自动重试，而不是等 1800 秒的定期心跳。"""
+    clock = Clock()
+    # 一帧坏输出会触发一次「修复调用」，两次都坏这一帧才算失败。
+    broken = lambda messages: "这不是 JSON"  # noqa: E731
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            broken,
+            broken,
+            _reply("重试成功了。"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
+        assert wait_until(lambda: len(llm.calls) >= 2), "失败帧未被调用"
+        time.sleep(0.3)
+        assert transport.sent == [], "失败帧不应发出任何消息"
+        assert brain._frame_failures == 1, "失败未计数"
+
+        # 退避期内不会立刻重试
+        assert not any(m["text"] == "重试成功了。" for m in transport.sent)
+
+        clock.advance(6.0)
+        assert wait_until(
+            lambda: any(m["text"] == "重试成功了。" for m in transport.sent)
+        ), "帧失败后没有自动重试"
+        assert brain._frame_failures == 0, "重试成功后计数未清零"
+    finally:
+        brain.stop("测试结束")
+
+
+def test_silent_idle_episode(tmpdir):
+    """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
+    clock = Clock()
+    llm = FakeLLM([_startup_decision, _idle(), _idle()])
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "在吗")
+        assert wait_until(lambda: not brain.events.unhandled()), "idle 帧未处理事件"
+
+        def silence_episode():
+            return any(
+                "没回复" in episode.description
+                for episode in brain.memory.store.list_episodes()
+            )
+
+        assert wait_until(silence_episode), "被忽略的消息没有留下情景"
+
+        before = len(brain.memory.store.list_episodes())
+        # 再来一帧纯发呆（无事件），不应增加情景
+        brain.submit_event(
+            Event(
+                id="",
+                kind=EventKind.SYSTEM,
+                at=to_iso(clock.now()),
+                payload={"event": "test_ping"},
+            )
+        )
+        assert wait_until(lambda: len(llm.calls) >= 3), "第三帧未触发"
+        time.sleep(0.2)
+        assert (
+            len(brain.memory.store.list_episodes()) == before
+        ), "纯发呆不应写入情景"
+    finally:
+        brain.stop("测试结束")
+
+
 _TESTS = [
     ("被动回复 chat.reply", test_passive_reply),
     ("tool.call 多帧", test_tool_call_then_reply),
@@ -613,6 +753,10 @@ _TESTS = [
     ("peer 上线唤醒", test_peer_online_wake),
     ("inbox 上限并逐帧排空", test_inbox_cap_drains),
     ("持久化与重载", test_persistence_reload),
+    ("终态帧自动写入情景", test_auto_episode),
+    ("启动帧不写情景", test_startup_writes_no_episode),
+    ("沉默的 idle 留痕但不记发呆", test_silent_idle_episode),
+    ("帧失败自动重试", test_frame_failure_retries),
 ]
 
 

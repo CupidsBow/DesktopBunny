@@ -17,7 +17,6 @@ from manager.activity.activity import ActivityService
 from manager.capabilities.executor import CapabilityExecutor
 from manager.executor.chat_sender import ChatSender
 from manager.lifecycle.lifecycle import Lifecycle
-from manager.memory.memory import Memory
 from manager.shared.config import BrainConfig
 from manager.shared.timeutil import now_local
 from manager.shared.types import (
@@ -55,7 +54,6 @@ class Executor:
         self,
         config: BrainConfig,
         *,
-        memory: Memory,
         activities: ActivityService,
         chat_sender: ChatSender,
         lifecycle: Lifecycle,
@@ -63,7 +61,6 @@ class Executor:
         now_fn=now_local,
     ) -> None:
         self.config = config
-        self.memory = memory
         self.activities = activities
         self.chat_sender = chat_sender
         self.lifecycle = lifecycle
@@ -83,50 +80,27 @@ class Executor:
         at = at or self.now_fn()
         result = EffectResult()
         target = decision.target
-        speaker = (target.friend_id if target else None) or speaker
 
-        # 1. 记忆写入不阻塞后续发送
-        self._remember(decision, speaker, at, result)
-
-        # 2. 聊天
+        # 1. 聊天
         if decision.action in (Action.CHAT_REPLY, Action.CHAT_REACH_OUT):
             self._chat(decision, target, result)
 
-        # 3. 能力调用
+        # 2. 能力调用
         if decision.action is Action.TOOL_CALL:
             self._tool_call(decision, caller, result)
 
-        # 4. 活动
+        # 3. 活动
         if decision.activity_update is not None:
             self._update_activity(decision, result)
         self._activity_action(decision, result)
 
-        # 5. 排下一次唤醒（闹钟）；tool.call 由能力结果触发下一帧，不排。
+        # 4. 排下一次唤醒（闹钟）；tool.call 由能力结果触发下一帧，不排。
         if decision.is_terminal:
             self._schedule_wake(decision, result)
 
         return result
 
     # ------------------------------------------------------------------
-    def _remember(
-        self,
-        decision: Decision,
-        speaker: str | None,
-        at: datetime,
-        result: EffectResult,
-    ) -> None:
-        if decision.remember is None or not decision.remember.text.strip():
-            return
-        try:
-            self.memory.remember(
-                decision.remember,
-                speaker=speaker,
-                at=at,
-            )
-        except Exception as exc:
-            logger.warning("提交记忆写入失败：%s", exc)
-            result.errors.append(f"记忆写入失败: {exc}")
-
     def _chat(
         self,
         decision: Decision,

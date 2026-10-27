@@ -43,7 +43,7 @@ class MemoryApi:
         if text.startswith("memory/"):
             text = text[len("memory/") :]
         if text.startswith("episodes/") or "/episodes/" in f"/{text}":
-            raise ValueError("情景记忆只能通过 remember 写入")
+            raise ValueError("情景记忆由机制自动写入，不能通过 memory.write 修改")
         if text not in _ALLOWED_FILES and not text.startswith(_ALLOWED_PREFIXES):
             raise ValueError(
                 "target 只能是 self.md、goals.md、preferences.md 或 friends/<id>.md"

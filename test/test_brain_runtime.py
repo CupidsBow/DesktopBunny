@@ -102,6 +102,9 @@ class FakeLLM:
         system = messages[0]["content"] if messages else ""
         if "记忆整理程序" in system:
             return '{"operations": []}'
+        if "检索员" in system:
+            # 召回选择器：不挑，让调用方退回关键词顺序
+            return '{"picks": []}'
         item = self.script.pop(0) if self.script else {}
         return item(messages) if callable(item) else json.dumps(item, ensure_ascii=False)
 
@@ -1191,6 +1194,55 @@ def test_peer_online_yields_to_pending_message(tmpdir):
     assert not signals, "有未读消息时不该再发上线信号"
 
 
+def test_l1_compression_prefers_low_salience(tmpdir):
+    """压缩挑情绪最平的那一段，而不是无脑从最早开始。"""
+    from manager.memory.memory import Memory
+
+    turns = [
+        {"id": "a", "role": "user", "speaker": "u_1", "text": "重要的开头", "at": "", "salience": 0.9},
+        {"id": "b", "role": "user", "speaker": "u_1", "text": "随便聊聊天气", "at": "", "salience": 0.0},
+        {"id": "c", "role": "user", "speaker": "u_1", "text": "再说点别的", "at": "", "salience": 0.5},
+        {"id": "d", "role": "user", "speaker": "u_1", "text": "又是废话", "at": "", "salience": 0.1},
+    ]
+    chunk = Memory._pick_chunk(turns, need=1, cap=1000)
+    assert chunk[0]["id"] == "b", f"应挑最低显著性，实际 {[t['id'] for t in chunk]}"
+
+    # 需要更多内容时会向两侧扩，但仍然从最低那句出发
+    bigger = Memory._pick_chunk(turns, need=40, cap=1000)
+    ids = [turn["id"] for turn in bigger]
+    assert "b" in ids and ids[0] in ("a", "b"), f"扩张后应包含低显著句，实际 {ids}"
+
+
+def test_index_brief_and_wake_wording(tmpdir):
+    """索引不给模型看路径；唤醒理由说人话。"""
+    from manager.brain import _wake_detail
+    from manager.memory.index import MemoryIndexEntry, render_brief
+
+    brief = render_brief(
+        MemoryIndexEntry(
+            name="2026-10-28-u_1-回复-文章",
+            path="C:/Users/x/AppData/Local/Bunny/Alice/memory/episodes/2026-10-28-u_1-回复-文章.md",
+            description="回复 u_1：记得看那篇文章",
+            valence=0.4,
+            arousal=0.3,
+        )
+    )
+    assert "C:/Users" not in brief, "索引行不该带路径"
+    assert "2026-10-28" in brief and "文章" in brief
+
+    detail = _wake_detail(
+        Event(
+            id="ev_1",
+            kind=EventKind.MESSAGE,
+            at="",
+            source=EventSource(friend_id="FD694B94A3E1E850C9A8F0A03F976157"),
+            payload={},
+        )
+    )
+    assert "message from" not in detail, "唤醒理由不该是英文机器标识"
+    assert "消息" in detail
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -1251,6 +1303,8 @@ _TESTS = [
     ("多轮 messages", test_multi_turn_messages),
     ("L1 不重复记录来信", test_unhandled_message_not_duplicated),
     ("上线信号让位未读消息", test_peer_online_yields_to_pending_message),
+    ("L1 压缩挑低显著性", test_l1_compression_prefers_low_salience),
+    ("索引不带路径 / 唤醒说人话", test_index_brief_and_wake_wording),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),

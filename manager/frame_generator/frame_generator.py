@@ -8,10 +8,7 @@ from typing import Any, Iterable
 
 from manager.capabilities.registry import CapabilityRegistry
 from manager.frame_generator.assembly import PromptAssembly
-from manager.frame_generator.personality import (
-    ensure_personality_file,
-    render_personality,
-)
+from manager.frame_generator.personality import render_personality
 from manager.frame_generator.prompt import MECHANICS
 from manager.frame_generator.situation import SituationBuilder
 from manager.memory.memory import Memory
@@ -46,7 +43,6 @@ class FrameGenerator:
         *,
         now_fn=now_local,
         name: str = "Alice",
-        personality_path: str | None = None,
     ) -> None:
         self._situation = SituationBuilder(memory, now_fn=now_fn, name=name)
         self._memory = memory
@@ -54,9 +50,6 @@ class FrameGenerator:
         #: 能力在启动时就固定了，工具表编译一次即可。
         self._tool_spec = build_tools(registry.as_dicts())
         self._name = name
-        self._personality_path = personality_path
-        if personality_path:
-            ensure_personality_file(personality_path)
 
     def build(
         self,
@@ -87,7 +80,7 @@ class FrameGenerator:
             notes=notes,
         )
         messages = PromptAssembly(
-            personality=render_personality(self._name, self._personality_path),
+            personality=render_personality(self._name),
             mechanics=MECHANICS,
             contexts=self._contexts(now or now_fn(), self_state),
             turns=self._memory.turn_messages(),

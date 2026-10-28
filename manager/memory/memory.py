@@ -6,12 +6,14 @@ import json
 import logging
 import os
 import threading
+import uuid
 from datetime import datetime
 from typing import Any, Iterable, Mapping
 
 from manager.memory.compression import L1Compressor
 from manager.memory.index import MemoryIndex
 from manager.memory.recall import Recall
+from manager.memory.selector import select_relevant
 from manager.memory.store import MemoryStore
 from manager.memory.turns import render_l1_turn
 from manager.memory.worker import MemoryWorker
@@ -30,7 +32,7 @@ from manager.shared.types import (
 logger = logging.getLogger(__name__)
 
 
-_INDEX_VIEW_LIMIT = 60
+_INDEX_VIEW_LIMIT = 20
 _SUMMARY_LIMIT = 4096
 #: 每帧作为真正的多轮 messages 带上的对话条数。
 _L1_MESSAGE_TURNS = 12
@@ -50,11 +52,13 @@ class Memory:
         self.paths = paths
         self.config = config
         self.now_fn = now_fn
+        #: 召回的选择器要用它做一次独立调用；没有就退回关键词顺序。
+        self.llm = llm
         self.store = MemoryStore(paths, config)
         self.index = MemoryIndex(paths.index_path, config)
         self.recall_service = Recall(self.store, self.index, config)
         self.worker = MemoryWorker(self.store, self.index)
-        self._recent_turns: list[str] = []
+        self._recent_turns: list[dict[str, Any]] = []
         self._l1_summary = ""
         self._buffer_lock = threading.Lock()
         self._save_lock = threading.Lock()
@@ -280,7 +284,27 @@ class Memory:
         return episodes
 
     def recall(self, query: str, limit: int | None = None) -> list[dict]:
-        return self.recall_service.recall(query, limit)
+        """两段式召回：关键词粗筛，再交给独立的一次模型调用挑选。
+
+        选择器失败、或候选不够多时，直接返回关键词顺序的结果。
+        """
+        limit = int(limit or self.config.recall_max_episodes)
+        if not (query or "").strip():
+            return []
+        candidates = self.recall_service.recall(
+            query, max(limit, int(self.config.recall_candidate_limit))
+        )
+        if (
+            self.llm is None
+            or not self.config.recall_use_llm
+            or len(candidates) <= limit
+        ):
+            return candidates[:limit]
+
+        picks = select_relevant(self.llm, query, candidates, limit)
+        if picks is None:
+            return candidates[:limit]
+        return [candidates[index] for index in picks] or candidates[:limit]
 
     def read_semantic(self, target: str) -> str:
         """读语义记忆文件；能力层已不再暴露读取入口，留给内部与诊断使用。"""
@@ -350,41 +374,93 @@ class Memory:
             return self._l1_summary
 
     def l1_compression_snapshot(self) -> tuple[str, list[dict[str, Any]]] | None:
-        """返回（已有摘要, 待压缩的最早一段对话）；未超限时返回 None。"""
+        """返回（已有摘要, 待压缩的一段对话）；未超限时返回 None。
+
+        挑哪一段：在较早的 60% 里，从**情绪最平**的一句开始向两边扩，凑够
+        需要的字数。压掉一次闲聊，比压掉一次吵架划算；也不动刚说过的几句。
+        """
         with self._buffer_lock:
             turns = list(self._recent_turns)
             summary = self._l1_summary
             total = self._l1_chars(summary, turns)
             if total <= self.config.l1_context_max_chars or not turns:
                 return None
-            # 目标：压缩后回到上限的一半左右；单次最多带一个上限的原文，
-            # 避免一次调用塞进过长的提示词。
+            # 目标：压缩后回到上限的一半左右。
             need = max(1, total - self.config.l1_context_max_chars // 2)
-            chunk: list[dict[str, Any]] = []
-            size = 0
-            for turn in turns:
-                chunk.append(turn)
-                size += len(render_l1_turn(turn)) + 1
-                if size >= need or size >= self.config.l1_context_max_chars:
-                    break
+            span = max(1, int(len(turns) * 0.6))
+            chunk = self._pick_chunk(
+                turns[:span], need, self.config.l1_context_max_chars
+            )
             if not chunk:
                 return None
             return summary, chunk
 
+    @staticmethod
+    def _pick_chunk(
+        candidates: list[dict[str, Any]], need: int, cap: int
+    ) -> list[dict[str, Any]]:
+        """从显著性最低的一句起，向两侧取相邻对话，直到凑够 ``need`` 字。"""
+        if not candidates:
+            return []
+        start = min(
+            range(len(candidates)),
+            key=lambda index: float(candidates[index].get("salience") or 0.0),
+        )
+        low = high = start
+        size = len(render_l1_turn(candidates[start])) + 1
+        while size < need and (low > 0 or high < len(candidates) - 1):
+            before = (
+                len(render_l1_turn(candidates[low - 1])) + 1 if low > 0 else None
+            )
+            after = (
+                len(render_l1_turn(candidates[high + 1])) + 1
+                if high < len(candidates) - 1
+                else None
+            )
+            if before is None:
+                high += 1
+                size += after or 0
+            elif after is None:
+                low -= 1
+                size += before
+            elif before <= after:
+                low -= 1
+                size += before
+            else:
+                high += 1
+                size += after
+            if size >= cap:
+                break
+        return candidates[low : high + 1]
+
     def apply_l1_compression(self, chunk: list[dict[str, Any]], summary: str) -> bool:
-        """用新摘要替换最早的一段对话；对话已变化时放弃本次结果。"""
+        """用新摘要替换被挑中的那段对话；对话已变化时放弃本次结果。"""
         text = (summary or "").strip()
         if not chunk or not text:
             return False
         limit = max(50, int(self.config.l1_summary_max_chars))
         if len(text) > limit:
             text = text[:limit].rstrip() + "…"
+        ids = {str(turn.get("id") or "") for turn in chunk}
+        if "" in ids:
+            # 旧存档没有 id，退回按前缀删。
+            ids = set()
         with self._buffer_lock:
             if self._stopped:
                 return False
-            if self._recent_turns[: len(chunk)] != chunk:
-                return False
-            del self._recent_turns[: len(chunk)]
+            if ids:
+                remaining = [
+                    turn
+                    for turn in self._recent_turns
+                    if str(turn.get("id") or "") not in ids
+                ]
+                if len(self._recent_turns) - len(remaining) != len(chunk):
+                    return False
+                self._recent_turns = remaining
+            else:
+                if self._recent_turns[: len(chunk)] != chunk:
+                    return False
+                del self._recent_turns[: len(chunk)]
             self._l1_summary = text
         self._save_l1()
         return True
@@ -419,26 +495,32 @@ class Memory:
         alice_text: str | None,
         *,
         at: datetime | None = None,
+        salience: float = 0.0,
     ) -> None:
         at = at or self.now_fn()
         stamp = f"{at:%H:%M}"
+        weight = max(0.0, min(1.0, float(salience)))
         with self._buffer_lock:
             if user_text and user_text.strip():
                 self._recent_turns.append(
                     {
+                        "id": uuid.uuid4().hex[:12],
                         "role": "user",
                         "speaker": speaker,
                         "text": user_text.strip(),
                         "at": stamp,
+                        "salience": weight,
                     }
                 )
             if alice_text and alice_text.strip():
                 self._recent_turns.append(
                     {
+                        "id": uuid.uuid4().hex[:12],
                         "role": "assistant",
                         "speaker": None,
                         "text": alice_text.strip(),
                         "at": stamp,
+                        "salience": weight,
                     }
                 )
             self._trim_hard_limit_locked()
@@ -451,13 +533,26 @@ class Memory:
             self.compressor.notify()
 
     def _trim_hard_limit_locked(self) -> None:
-        """压缩长期失败时的最后防线：限制 L1 行数，避免无限增长。"""
+        """压缩长期失败时的最后防线：限制 L1 行数。
+
+        先丢情绪最平的那些，同分才按时间先后——一次吵架比十次闲扯更该留住。
+        """
         limit = max(1, int(self.config.l1_hard_max_lines))
         excess = len(self._recent_turns) - limit
         if excess <= 0:
             return
-        del self._recent_turns[:excess]
-        logger.warning("L1 压缩持续失败，丢弃最早的 %s 行对话", excess)
+        ranked = sorted(
+            range(len(self._recent_turns)),
+            key=lambda index: (
+                float(self._recent_turns[index].get("salience") or 0.0),
+                index,
+            ),
+        )
+        drop = set(ranked[:excess])
+        self._recent_turns = [
+            turn for index, turn in enumerate(self._recent_turns) if index not in drop
+        ]
+        logger.warning("L1 压缩持续失败，丢弃情绪最平的 %s 行对话", excess)
 
     def remember_episode(
         self,

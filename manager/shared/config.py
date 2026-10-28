@@ -53,11 +53,6 @@ class BrainPaths:
         return os.path.join(self.memory_dir, "preferences.md")
 
     @property
-    def personality_path(self) -> str:
-        """人设卡：身份与语气，可编辑；缺失时按默认人设生成。"""
-        return os.path.join(self.root, "personality.md")
-
-    @property
     def state_dir(self) -> str:
         return os.path.join(self.root, "state")
 
@@ -210,6 +205,10 @@ class BrainConfig:
     memory_index_max_lines: int = 200
     memory_index_max_bytes: int = 25 * 1024
     recall_max_episodes: int = 12
+    #: 召回是否再让一次独立的小调用挑一遍（关键词只保证字面沾边）。
+    recall_use_llm: bool = True
+    #: 粗筛给选择器的候选条数。
+    recall_candidate_limit: int = 24
     #: 每帧自动召回：取几条、摘要总预算多少字符。召回由装配层做，不再作为能力。
     recall_auto_limit: int = 8
     recall_auto_max_chars: int = 1200

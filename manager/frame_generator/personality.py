@@ -1,21 +1,18 @@
-"""人设卡：兔子「是谁、怎么说话」的可编辑文本。
+"""人设卡：兔子「是谁、怎么说话」。
+
+人设写死在代码里（:data:`DEFAULT_PERSONALITY`），不读数据目录的文件——
+这样它和别的源码一样进版本库，改了能看见历史，也不会出现"代码里一套、
+磁盘上另一套"。
 
 与 ``prompt.py`` 的机制层分工：
 
-- **人设**（本模块）：身份、与主人的关系、自我认知。放在数据目录的
-  ``personality.md``，改完下一帧生效，不必动代码。
+- **人设**（本模块）：身份、与主人的关系、自我认知、说话的样子。
 - **机制**（``prompt.py``）：动作空间、环境与身体的读法、输出协议。
-  所有兔子共用，写死在代码里，避免人设写错就把工具规则带歪。
 
-文件缺失时用 :data:`DEFAULT_PERSONALITY`，并自动落盘一份，方便直接编辑。
+机制层所有兔子共用；人设写错不会把工具规则带歪。
 """
 
 from __future__ import annotations
-
-import logging
-import os
-
-logger = logging.getLogger(__name__)
 
 #: 默认人设。``{name}`` 会在装配 prompt 时替换成本地兔子的名字。
 DEFAULT_PERSONALITY = """# {name}
@@ -38,47 +35,9 @@ DEFAULT_PERSONALITY = """# {name}
 """
 
 
-def load_personality(path: str | os.PathLike | None = None) -> str:
-    """读取人设卡；不存在、为空或读不出来时退回默认人设。
-
-    每帧都会调用一次：文件很小，读盘成本远低于一次 LLM 请求，
-    换来的是改完人设不必重启。
-    """
-    if not path:
-        return DEFAULT_PERSONALITY
-    try:
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read().strip()
-    except FileNotFoundError:
-        return DEFAULT_PERSONALITY
-    except OSError as exc:
-        logger.warning("人设卡读取失败，使用默认人设：%s", exc)
-        return DEFAULT_PERSONALITY
-    return text or DEFAULT_PERSONALITY
+def render_personality(name: str) -> str:
+    """把默认人设里的 ``{name}`` 换成这只兔子的名字。"""
+    return DEFAULT_PERSONALITY.replace("{name}", name)
 
 
-def ensure_personality_file(path: str | os.PathLike) -> None:
-    """首次启动时把默认人设落盘；已有文件不覆盖。"""
-    if os.path.exists(path):
-        return
-    try:
-        parent = os.path.dirname(os.fspath(path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(DEFAULT_PERSONALITY)
-    except OSError as exc:
-        logger.warning("人设卡无法写入，将每次使用默认人设：%s", exc)
-
-
-def render_personality(name: str, path: str | os.PathLike | None = None) -> str:
-    """按名字渲染人设卡。用 replace 而不是 format，避免文件里的花括号报错。"""
-    return load_personality(path).replace("{name}", name)
-
-
-__all__ = [
-    "DEFAULT_PERSONALITY",
-    "ensure_personality_file",
-    "load_personality",
-    "render_personality",
-]
+__all__ = ["DEFAULT_PERSONALITY", "render_personality"]

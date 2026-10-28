@@ -41,8 +41,25 @@ def parse_line(line: str) -> MemoryIndexEntry | None:
 
 
 def render_line(entry: MemoryIndexEntry) -> str:
+    """索引文件的存储格式（含路径），解析回来要一一对应，别随意改。"""
     description = " ".join((entry.description or "").split())
     line = f"- [{entry.name}]({entry.path}) — {description}"
+    if entry.valence is not None and entry.arousal is not None:
+        line += f" · v={entry.valence:g} a={entry.arousal:g}"
+    return line
+
+
+def render_brief(entry: MemoryIndexEntry) -> str:
+    """给认知看的一行摘要：日期 + 描述 + 情绪强度。
+
+    不带路径——每行能省七八十字，而她在对话里引用不了文件。真正需要原文时
+    由召回按条目取。
+    """
+    description = " ".join((entry.description or "").split())
+    name = (entry.name or "").strip()
+    date = name[:10] if len(name) >= 10 and name[:4].isdigit() else ""
+    label = f"{date} {description}".strip() if date else (description or name)
+    line = f"- {label}"
     if entry.valence is not None and entry.arousal is not None:
         line += f" · v={entry.valence:g} a={entry.arousal:g}"
     return line

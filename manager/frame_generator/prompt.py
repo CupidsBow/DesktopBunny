@@ -33,14 +33,9 @@ MECHANICS = """关于选择：
 不解释内部机制，不输出分析过程。"""
 
 
-def system_prompt(name: str, personality: str | None = None) -> str:
+def system_prompt(name: str) -> str:
     """人设卡在前，机制层在后。"""
-    body = (
-        render_personality(name)
-        if personality is None
-        else personality.replace("{name}", name)
-    )
-    return f"{body.strip()}\n\n{MECHANICS}"
+    return f"{render_personality(name).strip()}\n\n{MECHANICS}"
 
 
 def build_messages(
@@ -50,7 +45,6 @@ def build_messages(
     related: Sequence[Mapping[str, Any]] = (),
     contexts: Sequence[str] = (),
     name: str = "Alice",
-    personality: str | None = None,
 ) -> list[dict[str, str]]:
     """便捷入口：直接攒出 messages。
 
@@ -59,18 +53,13 @@ def build_messages(
     """
     from manager.frame_generator.assembly import PromptAssembly
 
-    body = (
-        render_personality(name)
-        if personality is None
-        else personality.replace("{name}", name)
-    )
     recall = [
         str(item.get("summary") or "").strip()
         for item in related
         if str(item.get("summary") or "").strip()
     ]
     return PromptAssembly(
-        personality=body,
+        personality=render_personality(name),
         mechanics=MECHANICS,
         contexts=list(contexts),
         turns=[dict(turn) for turn in turns],

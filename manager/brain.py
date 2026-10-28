@@ -324,7 +324,6 @@ class Brain:
             self.registry,
             now_fn=now_fn,
             name=name,
-            personality_path=self.paths.personality_path,
         )
         self.thinker = Thinker(config, llm)
 
@@ -482,7 +481,7 @@ class Brain:
         self._notify(
             WakeReason(
                 kind=WakeReasonKind.EVENT,
-                detail=_describe_event(event),
+                detail=_wake_detail(event),
                 event_id=event.id,
             )
         )
@@ -623,7 +622,11 @@ class Brain:
         self._notify(
             WakeReason(
                 kind=WakeReasonKind.EVENT,
-                detail=f"{kind.value}: {call.capability}",
+                detail=(
+                    f"{call.capability} 跑完了"
+                    if result.ok
+                    else f"{call.capability} 失败了"
+                ),
                 event_id=event.id,
             )
         )
@@ -915,8 +918,15 @@ class Brain:
         events: list[Event],
         speaker: str | None,
         now: datetime,
+        *,
+        mood: float = 0.0,
     ) -> None:
-        """把本帧真正消费的来信与回复写进 L1。"""
+        """把本帧真正消费的来信与回复写进 L1。
+
+        ``mood`` 会作为这条对话的显著性存下来：|mood| 越大越舍不得丢，
+        L1 压缩时先压掉情绪最平的那些。
+        """
+        salience = min(1.0, abs(float(mood)))
         handled = set(decision.handled or [])
         messages = [
             event
@@ -939,6 +949,7 @@ class Brain:
                     latest.payload.get("text") if latest is not None else None,
                     reply,
                     at=now,
+                    salience=salience,
                 )
             except Exception as exc:
                 logger.debug("写入 L1 失败：%s", exc)
@@ -947,7 +958,9 @@ class Brain:
             messages = [event for event in messages if event is not latest]
         elif decision.action is Action.CHAT_REACH_OUT and reply:
             try:
-                self.memory.record_turn(speaker, None, reply, at=now)
+                self.memory.record_turn(
+                    speaker, None, reply, at=now, salience=salience
+                )
             except Exception as exc:
                 logger.debug("写入 L1 失败：%s", exc)
         for event in messages:
@@ -1102,6 +1115,34 @@ class Brain:
 
 
 # ----------------------------------------------------------------------
+def _wake_detail(event: Event) -> str:
+    """唤醒理由的中文说法。只给认知看，日志仍旧用 ``_describe_event``。
+
+    她在情境里读到的是这些句子，混进 ``message from FD69…`` 这种机器标识
+    会把她说话的调子带歪。
+    """
+    if event.kind is EventKind.MESSAGE:
+        who = event.source.friend_id or ""
+        return f"{_short_id(who)} 发来一条消息" if who else "有人发来一条消息"
+    if event.kind is EventKind.CAPABILITY_DONE:
+        return f"{event.payload.get('capability', '能力')} 跑完了"
+    if event.kind is EventKind.CAPABILITY_FAILED:
+        return f"{event.payload.get('capability', '能力')} 失败了"
+    if event.kind is EventKind.ALARM:
+        return "你之前约的时间到了"
+    if event.kind is EventKind.SIGNAL:
+        return f"身体或环境有变化：{event.payload.get('signal', '')}".strip("：")
+    return f"发生了一件事：{event.payload.get('event', '')}".strip("：")
+
+
+def _short_id(friend_id: str) -> str:
+    """太长的主体 id 只留前 6 位，避免一长串十六进制破坏语感。"""
+    text = str(friend_id or "")
+    if text.startswith("peer:"):
+        return text[len("peer:") :]
+    return text[:6] + "…" if len(text) > 8 else text
+
+
 def _describe_event(event: Event) -> str:
     if event.kind is EventKind.MESSAGE:
         return f"message from {event.source.friend_id or '?'}"

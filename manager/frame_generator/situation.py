@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Iterable
 
-from manager.memory.index import render_line
+from manager.memory.index import render_brief
 from manager.memory.memory import Memory
 from manager.shared.timeutil import now_local, to_iso
 from manager.shared.types import (
@@ -79,8 +79,8 @@ class SituationBuilder:
             ],
             "self": {
                 "identity": self.name,
-                "mood": round(self_state.mood, 3),
-                # mood_label 不再重复：它已作为 system 末尾的一行上下文。
+                # 心情不在这里：它已经是 system 末尾的一行（"你现在的心情：平静"）。
+                # 同一个事实给两遍只会浪费字数，还容易让人分不清哪个算准。
                 "urge_details": [
                     {
                         "name": urge.name,
@@ -133,7 +133,7 @@ class SituationBuilder:
                 "about_speaker": view.about_speaker,
                 "speaker_first_seen": view.speaker_first_seen,
                 "speaker_last_seen": view.speaker_last_seen,
-                "index": [render_line(entry) for entry in view.index],
+                "index": [render_brief(entry) for entry in view.index],
                 "friends": self._friend_lines(),
             },
             "delivery": _delivery(delivery),

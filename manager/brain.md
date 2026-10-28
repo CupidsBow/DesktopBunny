@@ -302,7 +302,8 @@ manager/
 ├── frame_generator/
 │   ├── frame_generator.py      # 帧生产者：聚合唤醒理由与只读视图
 │   ├── situation.py            # SituationBuilder
-│   ├── personality.py          # 人设卡：personality.md 的读取与默认值
+│   ├── personality.py          # 人设卡：写死在代码里的 DEFAULT_PERSONALITY
+│   ├── assembly.py             # PromptAssembly：分层攒内容再压平成 messages
 │   └── prompt.py               # 人设 + 机制层 + 情境（能力与协议走 tools 参数）
 ├── thinker/
 │   ├── thinker.py              # 调 LLM、解析并校验 Decision

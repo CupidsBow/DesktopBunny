@@ -1127,6 +1127,49 @@ def test_multi_turn_messages(tmpdir):
         brain.stop("测试结束")
 
 
+def test_unhandled_message_not_duplicated(tmpdir):
+    """模型漏标 handled 时，同一条来信不该在 L1 里记两遍。"""
+    clock = Clock()
+
+    def reply_without_handled(text):
+        def _fn(messages):
+            sit = _situation(messages)
+            return json.dumps(
+                {
+                    "action": "chat.reply",
+                    "target": _target_from(_message_event(sit)),
+                    "args": {"text": text},
+                    "handled": [],
+                },
+                ensure_ascii=False,
+            )
+
+        return _fn
+
+    llm = FakeLLM(
+        [
+            _startup_decision,
+            reply_without_handled("第一句"),
+            _reply("第二句"),
+        ]
+    )
+    transport = FakeTransport()
+    brain = make_brain(tmpdir, llm, transport, clock=clock)
+    brain.start()
+    try:
+        wait_startup(brain, llm, transport)
+        QQAdapter(brain).submit_message("u_123", "m_1", "第一句话")
+        assert wait_until(lambda: any(m["text"] == "第一句" for m in transport.sent))
+
+        QQAdapter(brain).submit_message("u_123", "m_2", "第二句话")
+        assert wait_until(lambda: any(m["text"] == "第二句" for m in transport.sent))
+
+        context = brain.memory.recent_context()
+        assert context.count("第一句话") == 1, "同一条来信被重复写进了 L1"
+    finally:
+        brain.stop("测试结束")
+
+
 def test_silent_idle_episode(tmpdir):
     """idle 看到消息却没回时留痕；纯发呆不写记忆。"""
     clock = Clock()
@@ -1185,6 +1228,7 @@ _TESTS = [
     ("地址与文件名卫生", test_address_and_slug_hygiene),
     ("情境里的 peer 地址", test_peer_address_in_situation),
     ("多轮 messages", test_multi_turn_messages),
+    ("L1 不重复记录来信", test_unhandled_message_not_duplicated),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),

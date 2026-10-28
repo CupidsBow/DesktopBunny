@@ -68,6 +68,9 @@ _POLL_INTERVAL = 0.5
 #: 帧失败后的重试延迟（秒）。用尽后不再重试，退回定期心跳兜底。
 _FRAME_RETRY_DELAYS = (5, 15, 60, 180)
 
+#: 已经写进 L1 的事件 id 上限；超出就整体清空，只用于去重。
+_RECORDED_MESSAGE_LIMIT = 512
+
 
 class _ResumeWatcher:
     """暂停活动的 ``resume_when``：只产生闹钟事件，不自动恢复。
@@ -245,6 +248,8 @@ class Brain:
         self._turn = TurnState()
         #: 本回合用过的工具（"fs.read 刷钱机.txt"），终态帧写情景时带上。
         self._turn_trail: list[str] = []
+        #: 已经写进 L1 的事件 id，防止模型漏标 handled 时重复记录。
+        self._recorded_messages: set[str] = set()
         self._last_body_save = now_fn()
         self._episodes_cache: list = []
         self._episodes_at: datetime | None = None
@@ -926,6 +931,8 @@ class Brain:
                 )
             except Exception as exc:
                 logger.debug("写入 L1 失败：%s", exc)
+            if latest is not None:
+                self._recorded_messages.add(latest.id)
             messages = [event for event in messages if event is not latest]
         elif decision.action is Action.CHAT_REACH_OUT and reply:
             try:
@@ -933,6 +940,14 @@ class Brain:
             except Exception as exc:
                 logger.debug("写入 L1 失败：%s", exc)
         for event in messages:
+            # 模型没把某条来信标成 handled 时，它会一直留在 inbox 里；
+            # 每帧都重记一遍会让 L1 出现重复的同一句话。按事件 id 去重。
+            if event.id in self._recorded_messages:
+                continue
+            self._recorded_messages.add(event.id)
+            if len(self._recorded_messages) > _RECORDED_MESSAGE_LIMIT:
+                self._recorded_messages.clear()
+                self._recorded_messages.add(event.id)
             try:
                 self.memory.record_turn(
                     event.source.friend_id,

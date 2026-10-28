@@ -530,6 +530,17 @@ class Brain:
         self._known_peer_slugs = current
 
     def _peer_online(self, slug: str) -> None:
+        friend_id = f"peer:{slug}"
+        # 对方刚上线就发来消息时，两件事会撞进同一帧：模型容易先应"你上线啦"，
+        # 把消息晾在一边。既然消息本身就会唤醒，上线信号就让位。
+        if any(
+            event.kind is EventKind.MESSAGE
+            and event.source.friend_id == friend_id
+            for event in self.events.unhandled()
+        ):
+            logger.debug("朋友 %s 上线，但有未读消息，跳过上线信号", slug)
+            return
+
         logger.info("本地朋友上线：%s", slug)
         self._add_event(
             EventKind.SIGNAL,

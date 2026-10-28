@@ -7,11 +7,12 @@ from datetime import datetime
 from typing import Any, Iterable
 
 from manager.capabilities.registry import CapabilityRegistry
+from manager.frame_generator.assembly import PromptAssembly
 from manager.frame_generator.personality import (
     ensure_personality_file,
     render_personality,
 )
-from manager.frame_generator.prompt import build_messages
+from manager.frame_generator.prompt import MECHANICS
 from manager.frame_generator.situation import SituationBuilder
 from manager.memory.memory import Memory
 from manager.shared.tools_spec import ToolSpec, build_tools
@@ -85,18 +86,40 @@ class FrameGenerator:
             now=now,
             notes=notes,
         )
-        messages = build_messages(
-            situation,
-            turns=self._memory.turn_messages(),
-            related=related,
-            name=self._name,
+        messages = PromptAssembly(
             personality=render_personality(self._name, self._personality_path),
-        )
+            mechanics=MECHANICS,
+            contexts=self._contexts(now or now_fn(), self_state),
+            turns=self._memory.turn_messages(),
+            recall=[
+                str(item.get("summary") or "").strip()
+                for item in related
+                if str(item.get("summary") or "").strip()
+            ],
+            situation=situation,
+        ).render()
         return Frame(
             situation=situation,
             messages=messages,
             tool_spec=self._tool_spec,
         )
+
+    # ------------------------------------------------------------------
+    def _contexts(self, now: datetime, self_state: SelfState) -> list[str]:
+        """每帧变动的上下文：时间、心情、较早对话摘要。
+
+        放在 system 的末尾而不是情境 JSON 里——它们是"关于我自己的事实"，
+        不是"别人告诉我的信息"。
+        """
+        weekday = "一二三四五六日"[now.weekday()]
+        contexts = [
+            f"现在是 {now:%Y-%m-%d %H:%M}，周{weekday}。",
+            f"你现在的心情：{self_state.mood_label}。",
+        ]
+        summary = self._memory.l1_summary.strip()
+        if summary:
+            contexts.append("较早的对话摘要：\n" + summary)
+        return contexts
 
 
 __all__ = ["Frame", "FrameGenerator"]

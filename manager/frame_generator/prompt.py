@@ -1,18 +1,17 @@
-"""认知帧的 prompt：人设卡、机制规则、情境。
+"""认知帧的措辞层：机制规则、系统提示。
 
-system 消息 = 人设卡（``personality.py``，可编辑）+ 本模块的机制层（固定）。
-user 消息只剩情境——能力清单与输出协议改由 API 的 tools 参数约束，不再拼进文本。
+装配顺序由 :mod:`manager.frame_generator.assembly` 决定；这里只提供
+两块固定的文本——人设卡（外部可编辑）与机制层（写死在代码里）。
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any, Mapping, Sequence
 
 from manager.frame_generator.personality import render_personality
 
 #: 机制层：与具体兔子无关的规则。写死在这里，不随人设卡改动。
-_MECHANICS = """关于选择：
+MECHANICS = """关于选择：
 - 做什么、对谁说、说什么、继续还是停下、什么时候再醒来，全部由你决定。
 - 聊天不是默认动作。沉默、探索、学习、整理记忆都同样合法。
 - 现在没有值得做的事时，用 idle 安静结束这一帧，别硬找话聊。
@@ -35,14 +34,13 @@ _MECHANICS = """关于选择：
 
 
 def system_prompt(name: str, personality: str | None = None) -> str:
-    """装配 system 消息：人设卡在前，机制层在后。
-
-    ``personality`` 由调用方从磁盘读入；不传时使用默认人设。
-    """
-    body = render_personality(name) if personality is None else personality.replace(
-        "{name}", name
+    """人设卡在前，机制层在后。"""
+    body = (
+        render_personality(name)
+        if personality is None
+        else personality.replace("{name}", name)
     )
-    return f"{body.strip()}\n\n{_MECHANICS}"
+    return f"{body.strip()}\n\n{MECHANICS}"
 
 
 def build_messages(
@@ -50,58 +48,35 @@ def build_messages(
     *,
     turns: Sequence[Mapping[str, str]] = (),
     related: Sequence[Mapping[str, Any]] = (),
+    contexts: Sequence[str] = (),
     name: str = "Alice",
     personality: str | None = None,
 ) -> list[dict[str, str]]:
-    """装配一帧的消息。能力与协议走 tools 参数，这里只给历史、回忆与情境。
+    """便捷入口：直接攒出 messages。
 
-    最近几轮对话作为**真正的多轮 messages** 放在系统提示之后，而不是塞进
-    情境 JSON 的一段字符串——模型看到的"自己说过的话"得有 assistant 身份，
-    接话才对得上。
-
-    自动召回单独成一条消息，紧挨着情境：读起来是"我想起了几件事"，
-    而不是参数表里的一个字段。
+    正式路径走 :class:`PromptAssembly`；这个函数保留给测试与脚本用，
+    效果与 ``PromptAssembly.render()`` 一致。
     """
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt(name, personality)}
-    ]
-    for turn in turns:
-        role = str(turn.get("role") or "")
-        content = str(turn.get("content") or "")
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
+    from manager.frame_generator.assembly import PromptAssembly
 
+    body = (
+        render_personality(name)
+        if personality is None
+        else personality.replace("{name}", name)
+    )
     recall = [
         str(item.get("summary") or "").strip()
         for item in related
         if str(item.get("summary") or "").strip()
     ]
-    if recall:
-        lines = "\n".join(f"- {text}" for text in recall)
-        messages.append(
-            {
-                "role": "user",
-                "content": f"你刚才想起了几件旧事（可能不完整，也不一定都相关）：\n{lines}",
-            }
-        )
-
-    messages.append(
-        {
-            "role": "user",
-            "content": f"""## 当前情境
-
-```json
-{_dump(situation)}
-```
-
-现在，根据情境调用一个工具。""",
-        }
-    )
-    return messages
+    return PromptAssembly(
+        personality=body,
+        mechanics=MECHANICS,
+        contexts=list(contexts),
+        turns=[dict(turn) for turn in turns],
+        recall=recall,
+        situation=dict(situation),
+    ).render()
 
 
-def _dump(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-
-
-__all__ = ["build_messages", "system_prompt"]
+__all__ = ["MECHANICS", "build_messages", "system_prompt"]

@@ -844,7 +844,7 @@ def test_memory_capabilities(tmpdir):
         ), "回复未发出"
         memories = _situation(llm.calls[-1]).get("memories", {})
         assert "friends" in memories, "情境缺少好友摘要"
-        assert "recent_summary" in memories, "情境缺少 L1 摘要"
+        assert "recent_summary" not in memories, "摘要应作为 system 上下文给出"
         assert "related" not in memories, "召回应作为独立消息，不再埋在情境里"
     finally:
         brain.stop("测试结束")
@@ -1121,7 +1121,9 @@ def test_multi_turn_messages(tmpdir):
         ), "启动帧的发言没进多轮历史"
 
         situation = _situation(messages)
-        assert "recent_summary" in situation["memories"]
+        system = messages[0]["content"]
+        assert "recent_summary" not in situation["memories"], "摘要已移到 system 上下文"
+        assert "心情" in system, "心情应作为 system 末尾的上下文"
         assert "recent_context" not in situation["memories"], "旧字段应已移除"
     finally:
         brain.stop("测试结束")
@@ -1168,6 +1170,25 @@ def test_unhandled_message_not_duplicated(tmpdir):
         assert context.count("第一句话") == 1, "同一条来信被重复写进了 L1"
     finally:
         brain.stop("测试结束")
+
+
+def test_peer_online_yields_to_pending_message(tmpdir):
+    """对方上线时若已有未读消息，不再发上线信号。"""
+    clock = Clock()
+    brain = make_brain(tmpdir, FakeLLM([_startup_decision]), FakeTransport(), clock=clock)
+    brain.events.add(
+        Event(
+            id="",
+            kind=EventKind.MESSAGE,
+            at=to_iso(clock.now()),
+            source=EventSource(friend_id="peer:Bob"),
+            payload={"msg_id": "m_1", "text": "在吗"},
+        )
+    )
+    brain._peer_online("Bob")
+
+    signals = [e for e in brain.events.all() if e.kind is EventKind.SIGNAL]
+    assert not signals, "有未读消息时不该再发上线信号"
 
 
 def test_silent_idle_episode(tmpdir):
@@ -1229,6 +1250,7 @@ _TESTS = [
     ("情境里的 peer 地址", test_peer_address_in_situation),
     ("多轮 messages", test_multi_turn_messages),
     ("L1 不重复记录来信", test_unhandled_message_not_duplicated),
+    ("上线信号让位未读消息", test_peer_online_yields_to_pending_message),
     ("帧失败自动重试", test_frame_failure_retries),
     ("召回自动注入情境", test_related_memories_in_situation),
     ("记忆能力只留读档案", test_memory_capabilities),

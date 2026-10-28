@@ -80,7 +80,7 @@ class SituationBuilder:
             "self": {
                 "identity": self.name,
                 "mood": round(self_state.mood, 3),
-                "mood_label": self_state.mood_label,
+                # mood_label 不再重复：它已作为 system 末尾的一行上下文。
                 "urge_details": [
                     {
                         "name": urge.name,
@@ -135,7 +135,6 @@ class SituationBuilder:
                 "speaker_last_seen": view.speaker_last_seen,
                 "index": [render_line(entry) for entry in view.index],
                 "friends": self._friend_lines(),
-                "recent_summary": self.memory.l1_summary,
             },
             "delivery": _delivery(delivery),
         }
